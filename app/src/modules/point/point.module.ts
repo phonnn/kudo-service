@@ -1,19 +1,17 @@
 import { Module } from '@nestjs/common';
 import { InfraModule } from '../../infra/infra.module';
-import { FeedModule } from '../feed';
 import { OutboxModule } from '../outbox';
+import { KudoReservedListener } from './listeners/kudo-reserved.listener';
 import { KudoDebitedListener } from './listeners/kudo-debited.listener';
 import { KudoCreditedListener } from './listeners/kudo-credited.listener';
 import { PointTransferService } from './services/point-transfer.service';
 import { ReceiverBalanceService } from './services/receiver-balance.service';
-import { PointController } from './point.controller';
 import { PointLedgerRepository } from './repositories/point-ledger.repository';
 import { PointTransferRepository } from './repositories/point-transfer.repository';
 import { ReceiverBalanceRepository } from './repositories/receiver-balance.repository';
 import { SenderBalanceRepository } from './repositories/sender-balance.repository';
 @Module({
-  imports: [InfraModule, FeedModule, OutboxModule],
-  controllers: [PointController],
+  imports: [InfraModule, OutboxModule],
   providers: [
     SenderBalanceRepository,
     PointTransferRepository,
@@ -21,6 +19,7 @@ import { SenderBalanceRepository } from './repositories/sender-balance.repositor
     ReceiverBalanceRepository,
     PointTransferService,
     ReceiverBalanceService,
+    KudoReservedListener,
     KudoDebitedListener,
     KudoCreditedListener,
   ],

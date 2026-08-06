@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Database, Generated } from '@kudo/database';
 import { DATABASE } from '../../../infra/token.constant';
-import type { CoreValue } from '../dto/send-kudo.dto';
+import type { CoreValue } from '../dto/core-value.enum';
 
 export interface PointTransferRecord {
   id: string;
@@ -34,6 +34,10 @@ export interface PointTransferDatabaseSchema {
 export class PointTransferRepository {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
+  // point_transfer keeps its own explicit idempotency lookup, independent of
+  // feed_post's (which guards the sync Phase 1 request-retry case) — this
+  // one is point_transfer's own guard for anything that needs to ask "does
+  // this idempotency key already have a transfer" directly.
   async findByIdempotencyKey(key: string): Promise<PointTransferRecord | null> {
     const row = await this.database
       .client<PointTransferDatabaseSchema>()
@@ -44,8 +48,15 @@ export class PointTransferRepository {
     return row ?? null;
   }
 
-  async create(record: CreatePointTransfer): Promise<void> {
-    await this.database
+  // called from KudoReservedListener, which must tolerate at-least-once
+  // redelivery of kudo.reserved (P6) — ON CONFLICT DO NOTHING makes the
+  // insert itself the idempotency guard rather than a separate check-then-act
+  // (same idiom as PointLedgerRepository.appendEarnCredit). Returns whether
+  // this call actually inserted the row, so the listener knows whether to
+  // proceed with the ledger append + kudo.debited enqueue or skip them
+  // because a prior delivery already did.
+  async create(record: CreatePointTransfer): Promise<boolean> {
+    const result = await this.database
       .client<PointTransferDatabaseSchema>()
       .insertInto('point_transfer')
       .values({
@@ -57,7 +68,11 @@ export class PointTransferRepository {
         status: 'pending',
         idempotency_key: record.idempotencyKey,
       })
-      .execute();
+      .onConflict((conflict) => conflict.column('idempotency_key').doNothing())
+      .returning('id')
+      .executeTakeFirst();
+
+    return result !== undefined;
   }
 
   // only transitions from 'pending' — a redelivered kudo.debited is a safe no-op

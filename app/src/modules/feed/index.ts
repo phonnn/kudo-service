@@ -1,5 +1,7 @@
 export { FeedModule } from './feed.module';
 export {
-  FeedPostRepository,
-  type FeedPostDatabaseSchema,
-} from './repositories/feed-post.repository';
+  FeedPostService,
+  type CreatePendingPostCommand,
+  type CreatePendingPostMedia,
+} from './services/feed-post.service';
+export type { FeedPostRecord } from './repositories/feed-post.repository';

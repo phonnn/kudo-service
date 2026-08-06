@@ -150,6 +150,8 @@ point_transfer                      -- one logical send; the money record only
   core_value    enum(...)
   status        enum('pending','completed','reversed')
   reversal_of   uuid null           -- self-ref, for compensations
+  idempotency_key text unique       -- Phase 1.5's own guard (kudo.reserved redelivery, §4) —
+                                     -- independent of feed_post's; each write is its own anchor
   created_at
 ```
 
@@ -163,13 +165,24 @@ feed_post                           -- the primary social object; extensible
   body          text                -- description; editable
   point_transfer_id uuid null fk    -- present for kudos; null for non-kudo posts
   visibility    enum('global','team',...)
-  status        enum('pending','published')   -- pending until money settles
+  status        enum('pending','published','failed')   -- pending until money settles;
+                                     -- 'failed' when Phase 1.5's atomic reserve loses a race
+                                     -- Phase 1's pre-check didn't catch (§4)
+  idempotency_key text unique       -- the Phase 1 request-retry guard (§4) — the post is
+                                     -- created before point_transfer exists, so this can't
+                                     -- key off point_transfer_id like it used to
   created_at, edited_at, deleted_at (soft delete)
 
 feed_media                          -- media belongs to the POST, not the transfer
-  id, post_id fk, kind('image','video'),
+  id, post_id fk, kind('image')     -- 'video' deferred — see §16; CHECK narrowed to match
   object_key text,                  -- points at the storage tool; bytes live in object storage
+  domain text,                      -- base URL object_key resolves under, SNAPSHOTTED at
+                                     -- upload time (same reasoning as redemption.cost_points) —
+                                     -- if the bucket/CDN domain ever changes, old rows still
+                                     -- resolve to where they actually live
   status enum('pending','ready','rejected'), duration_ms
+                                     -- both unused while kind is image-only: images write
+                                     -- straight to 'ready' with no async step (§4 Phase 2, §16)
 ```
 
 ### Rewards
@@ -214,99 +227,172 @@ until a *second* attachment kind actually exists.
 
 ## 4. Flow: Send a kudo
 
-The send path is: **one synchronous financial transaction, then an asynchronous fan-out
-guaranteed by the outbox.** From the client's perspective it's a single call that returns
-"sent"; behind it, several consumers do independent work.
+The send path treats the **feed post as the primary object and the point transfer as
+something attached to it** (§16): a small synchronous step reserves the budget and creates
+the post, then an asynchronous chain — driven entirely by the outbox, hop by hop — does the
+money bookkeeping and eventually publishes the post. From the client's perspective it's
+still a single call that returns "sent."
 
 ### The invariant that ties feed and money together
 
 > A kudo is visible in the feed **exactly when** its points have durably transferred.
 
 - Feed visibility ⟹ financial finality — guaranteed by the `pending → published` flip,
-  which only happens *after* the money commits.
-- Financial finality ⟹ eventual visibility — guaranteed by the outbox event.
+  which only happens *after* the money is actually credited (§5) — not merely reserved.
+- Financial finality ⟹ eventual visibility — guaranteed by the outbox event chain
+  (`kudo.reserved` → `kudo.debited` → `kudo.credited`), each link durable with the write
+  that produced it.
 
 ### Phase 0 — Media upload (no DB state)
 
-Client requests a presigned upload URL from the **storage tool**, uploads the file
-directly to object storage, and receives an `object_key`. This happens entirely before
-the send request. If it fails, the user retries the upload — no DB state exists yet.
-The server never touches video bytes (this is the "handle video without blocking the
-server / avoid OOM" answer).
+Client requests a presigned upload from the **storage tool** (`POST /media/presign`,
+image-only for now — see §16), uploads the file directly to object storage using the
+returned presigned POST fields, and receives an `object_key` + `domain`. This happens
+entirely before the send request, and the send request carries that `object_key`/`domain`
+as the *only* trace of it. If it fails, the user retries the upload — no DB state exists
+yet. The server never touches the file's bytes (this is the "handle media without blocking
+the server / avoid OOM" answer, and is why it's a POST-with-policy rather than a route the
+server proxies through).
 
-### Phase 1 — The send request (ONE synchronous transaction)
+### Phase 1 — The send request (ONE small synchronous transaction)
+
+Owned by `feed`'s `SendKudoService` (§12) — `point` is asked to do exactly one synchronous
+thing here (`PointTransferService.reserveBudget()`), everything else in this transaction is
+feed's own writes.
 
 ```
 BEGIN
-  UPDATE A(sender) SET remaining -= :points WHERE remaining >= :points
-  INSERT point_ledger: debit(sender, giving_spend, idempotency_key)   -- then ledger
-  INSERT point_transfer(status='pending')
-  INSERT feed_post(status='pending', point_transfer_id)
-  INSERT outbox('kudo.debited', {post_id, transfer_id, sender, recipient, points})
-COMMIT  → respond "sent" to the client
+  SELECT feed_post WHERE idempotency_key = :key
+    → if found, return it as-is (fast path — no further writes)
+  SELECT A(sender).remaining                                  -- a plain read, NOT the gate
+    → if remaining < points, fail fast: "Insufficient budget"
+  INSERT feed_post(status='pending', idempotency_key)     -- feed_media too, if present
+  INSERT outbox('kudo.reserved', {transfer_id (preminted), post_id, sender, recipient,
+                                   points, core_value, idempotency_key})
+COMMIT  → respond "sent" to the client: {transferId, postId, status:'pending'}
 fail    → rollback; nothing happened; client retries safely (idempotency key)
 ```
 
-Properties: one lock (sender's own row), everything else appends, no I/O, no media, no
-network. Because the only lock is on the *actor's own* row, **no cross-user lock ordering
-exists and the deadlock class is designed out** — not merely retried.
+Properties: no lock at all — the balance read isn't `FOR UPDATE`, so there's nothing here
+for concurrent requests to contend on. No I/O, no media, no network beyond the one read.
 
-**Ordering rule (sender side): balance → ledger, atomically.** The invariant lives on the
-balance, so the check-and-decrement is the gate; the ledger records the gated fact. Both
-in one transaction, so there's no window where budget moved but the ledger didn't, and no
-compensation is needed on the sender's own step.
+**The balance check here is a pre-check, not the gate — the real atomic reserve moved to
+Phase 1.5.** Earlier drafts of this design put the atomic conditional decrement here,
+synchronously, and deferred only `point_transfer`/ledger creation. That worked, but broke
+`sender_balance` and `point_ledger` moving together: the balance would be durably decremented
+in this transaction while the corresponding ledger row wouldn't exist until Phase 1.5 — a
+window where the ledger (P1's source of truth) didn't yet account for money the projection
+already reflected. Moving the atomic reserve itself into Phase 1.5, in the same transaction
+as the ledger debit, restores "balance → ledger, atomically" (§4's original invariant, and
+§7's) even after the split. This pre-check exists purely so an obviously-doomed request fails
+fast with an honest synchronous error, instead of paying for a round trip through the event
+chain first to learn the same thing.
 
-### Phase 2 — After commit (asynchronous, cannot corrupt money)
+**Idempotency moved to `feed_post`.** Since `point_transfer` no longer exists at this point,
+the request-retry guard can't key off it anymore — `feed_post.idempotency_key` (its own,
+independent unique column) is what makes *this* step idempotent under a client retry.
+`point_transfer` keeps its own separate `idempotency_key`, used by Phase 1.5's guard —
+each write has its own idempotency anchor, keyed by the same client-supplied value but
+checked independently at the point where at-least-once delivery actually matters for it.
 
-Guaranteed to run because the outbox row committed *with* the transaction:
+### Phase 1.5 — Reserve, then bookkeeping (async, reacts to `kudo.reserved`)
+
+```
+CONSUME kudo.reserved:
+  SELECT point_transfer WHERE idempotency_key = :key
+    → if found, stop — a prior delivery already fully processed this
+  UPDATE A(sender) SET remaining -= :points WHERE remaining >= :points   -- the real gate
+    → if 0 rows, emit 'kudo.reservation-failed' {transfer_id} and stop
+  INSERT point_transfer(status='pending')   -- ON CONFLICT (idempotency_key) DO NOTHING, belt-and-suspenders
+  INSERT point_ledger: debit(sender, giving_spend, idempotency_key)
+  INSERT outbox('kudo.debited', {post_id, transfer_id, sender, recipient, points})
+```
+
+The idempotency check runs *first*, before the atomic reserve — `reserve()` itself has no
+idea about idempotency keys, so without this check a redelivery after this already fully
+succeeded would decrement the balance a second time. Consumer-group delivery is sequential,
+not concurrent (a message is redelivered only after a prior attempt didn't ack it), so this
+check-then-reserve ordering is safe under P6's at-least-once guarantee without needing the
+reserve itself to be idempotency-key-aware.
+
+**What happens when the reserve loses the race Phase 1's pre-check didn't catch.** This is
+now a real, if rare, business failure — Phase 1's plain read can go stale between the
+request and this event being processed. The realistic trigger is two ordinary, back-to-back
+sends from the same sender (e.g. recognizing two teammates in a row), not abuse — each is
+its own idempotency key, so nothing earlier in the flow dedupes them against each other.
+Unlike a transient infra failure, retrying this indefinitely doesn't help: the budget was
+insufficient *at this moment*, and redelivery won't change that outcome without some other
+event happening first (a refund, a month rolling over). So this gives up on this specific
+kudo — `KudoReservationFailedListener` in
+`feed` reacts to `kudo.reservation-failed` by calling
+`FeedPostRepository.markFailedByTransferId()`, flipping the post to `'failed'` so it never
+becomes visible. `point` never touches `feed_post` directly to do this — the event is the
+seam (§12) — mirroring how `feed`'s `KudoCreditedListener` reacts to `kudo.credited`
+independently to publish, rather than `point` reaching into `feed`'s table itself.
+
+### Phase 2 — After the transfer exists (asynchronous, cannot corrupt money)
+
+Guaranteed to run because the outbox row committed *with* Phase 1.5's transaction:
 
 ```
 - outbox relay publishes 'kudo.debited' to the event bus  (guaranteed publish)
 - credit consumer inserts the receiver's ledger credit + flips post to 'published'
 - projection consumer folds ledger → receiver_balance (B)
 - notification + feed fan-out
-- video-processing job (validates <= 3 min, transcodes, marks media ready/rejected)
+- video-processing job (validates <= 3 min, transcodes, marks media ready/rejected) —
+  REQUIRED by the product spec, but not yet built: video isn't accepted at Phase 0 at all
+  yet (§16), so there is currently nothing for this job to consume. Images skip this phase
+  entirely — a `feed_media` row is written `ready` directly in Phase 1, since there's no
+  transcode/duration-validate step an image needs.
 ```
 
-Nothing after COMMIT can fail in a way that corrupts points — the points are already
+Nothing from here on can fail in a way that corrupts points — the points are already
 durable. A failed notification means a missed toast, not lost points. A too-long video
-gets marked `rejected` and the card shows text without it — **the recognition succeeds
-even if the video is bad.**
+will get marked `rejected` (once video ships) and the card will show text without it —
+**the recognition succeeds even if the video is bad.**
 
 ### The API response
 
-The response returns the kudo with per-part states: `transfer: completed`,
-`post: publishing`, `media: processing`. The frontend renders an optimistic "Sent ✓";
-the media slot shows a spinner until a later signal (SSE event or refetch) flips it to
-ready. The user perceives an instant atomic success; the eventual consistency is invisible.
+The response returns `{transferId, postId, status: 'pending'}` as soon as the budget is
+reserved and the post exists — `transferId` is valid even though the `point_transfer` row
+doesn't exist in the database yet (Phase 1.5 creates it, almost immediately in practice, the
+same way `postId` is always minted before its row exists). The frontend renders an
+optimistic "Sent ✓"; the eventual settling of the transfer and publishing of the post are
+both invisible to the client unless it polls or subscribes for updates.
 
 ### Why the outbox (the crux)
 
-Without it, "respond sync, do the rest async" is a lie: after the financial commit the
-process could crash before emitting the event, leaving money moved but the kudo never in
-the feed and its video never processed. Writing the event into an `outbox` table *inside
-the financial transaction* makes "money committed" and "event will publish" one atomic
-fact. A relay then publishes outbox rows and marks them done. Crash anywhere → the relay
-picks up the unpublished row on restart. This is the canonical solution to the dual-write
-problem and the single strongest distributed-systems signal in the design.
+Without it, "respond sync, do the rest async" is a lie at *every* hop, not just one: after
+the budget reserve commits, the process could crash before emitting `kudo.reserved`, leaving
+points spent with no record of why; after Phase 1.5 commits, it could crash before emitting
+`kudo.debited`, leaving the transfer/ledger written but the kudo never credited or
+published. Writing each event into the `outbox` table *inside* the transaction that produces
+it makes "this step's writes committed" and "the next step will run" one atomic fact, at
+every link in the chain — `kudo.reserved` → `kudo.debited` → `kudo.credited`. A relay then
+publishes outbox rows and marks them done; crash anywhere → the relay picks up the
+unpublished row on restart. This is the canonical solution to the dual-write problem,
+applied at each hop rather than once.
 
 ### Failure matrix
 
 | Fails at | Points moved? | Post created? | User sees | Recovery |
 |---|---|---|---|---|
 | Media upload (Phase 0) | No | No | Upload error | Retry upload |
-| Budget check (Phase 1) | No | No | "Insufficient budget" | Adjust points |
-| Mid-transaction crash | No (rolled back) | No | Generic error | Retry (idempotent) |
-| Response lost after commit | Yes | Yes | Timeout | Retry → dedup returns existing |
-| Video too long (Phase 2) | Yes | Yes | Card w/o video, "media rejected" | By design |
+| Budget pre-check (Phase 1) | No | No | "Insufficient budget" | Adjust points |
+| Mid-transaction crash (Phase 1) | No (rolled back) | No | Generic error | Retry (idempotent) |
+| Atomic reserve loses the race (Phase 1.5) | No | Yes, flips to `failed` | "Sent" initially, then never appears | `kudo.reservation-failed` → post marked `failed`; not retried (§4 Phase 1.5) |
+| Ledger/transfer write fails (Phase 1.5, infra only) | Reserved, not yet ledgered | Yes, stuck `pending` | "Sent", kudo never appears published | Retry via redelivery until it succeeds — no compensation needed, nothing left can fail for a business reason once the reserve committed |
+| Response lost after commit | No (not yet attempted) | Yes | Timeout | Retry → dedup via `feed_post.idempotency_key` returns existing |
+| Video too long (Phase 2) | Yes | Yes | Card w/o video, "media rejected" | By design — not yet reachable; video isn't accepted at Phase 0 yet (§16) |
 | Notification publish (Phase 2) | Yes | Yes | Kudo works, no toast | Reconciliation / acceptable |
 
 ---
 
 ## 5. Flow: Receive / credit
 
-Triggered by the `kudo.debited` event. This is the saga tail — the only genuinely
-distributed part, and it begins *after* the money has already durably left the sender.
+Triggered by the `kudo.debited` event. This is the saga tail on the *receiver* side — §4's
+Phase 1.5 is the equivalent on the sender side — and it begins *after* the money has already
+durably left the sender.
 
 **Ordering rule (receiver side): ledger → balance.** The receiver has *no invariant to
 gate* (you can always add points to someone). So the ledger credit is authoritative on
@@ -457,6 +543,13 @@ The line for review:
 > can violate — the sender's budget — plus its ledger record. Everything else is an append,
 > a derivation, or an idempotent side-effect, and deliberately sits outside so it can't hold
 > locks or block throughput.
+
+**Where this transaction actually lives, post-§4-split:** the atomic unit described above —
+`{budget mutation, ledger record of that mutation}` — is `PointTransferService
+.reserveKudoPoints()`, run from `KudoReservedListener` (§4 Phase 1.5), not the synchronous
+HTTP request. The request itself (§4 Phase 1) only does a plain, unlocked read of the
+balance — no lock, no mutation. The line above still holds; it just describes a transaction
+that now runs a hop later, asynchronously, rather than inline with the request.
 
 ### Idempotency (non-negotiable, P6)
 
@@ -699,7 +792,7 @@ app must satisfy.
 | `messaging` | `EventBus` (publish/subscribe) + retry/DLQ/outbox-relay | Redis Streams *(ship)*; in-memory *(tests)*, Kafka, RabbitMQ |
 | `auth` | `Authenticator` → `Principal` | OIDC *(ship)*; SAML, local+2FA |
 | `realtime` | `RealtimePush` (pushToUser/pushToRoom) | SSE *(ship)*; WebSocket |
-| `storage` | object ops (presign/put/get/delete by key) | S3/MinIO *(ship)*; GCS, local |
+| `storage` | `presignUpload(contentType)` → presigned POST | MinIO *(ship, self-hosted)*; real S3, GCS, local |
 | `ratelimit` | `RateLimiter.check(key)` | Redis *(ship)*; in-memory |
 
 An in-memory `messaging` adapter remains a useful test provider: integration tests can run
@@ -716,8 +809,9 @@ They store *different kinds of data* with *opposite access patterns*, so they ar
   objects by key**; you never query their contents. Providers: S3, MinIO, GCS.
 
 They meet exactly at the boundary: media *bytes* live in `storage`; the short *object key*
-referencing them lives in `database` (on `feed_media.object_key`). The DB never holds
-video bytes — which is precisely what keeps the server non-blocking and OOM-safe.
+(plus the `domain` it resolves under, snapshotted at upload time) lives in `database` (on
+`feed_media`). The DB never holds media bytes — which is precisely what keeps the server
+non-blocking and OOM-safe.
 
 ### Honest boundary (say it, don't oversell)
 
@@ -732,6 +826,13 @@ claiming total portability — and the idempotency discipline (P6) is exactly wh
 one for tests). The value captured is a *bounded, known* cost to swap later — a future change
 becomes "write an adapter," not "rewrite the domain." Additional providers are intentionally
 out of scope for the MVP.
+
+**`storage`'s S3 provider hand-rolls SigV4 POST-policy signing instead of depending on an
+AWS SDK.** MinIO speaks the same S3 API S3 does, so the signing algorithm (a documented,
+mechanical HMAC-SHA256 chain) is identical either way — the provider works unchanged
+against real AWS S3 by pointing `endpoint` there. This keeps `libs/storage` dependency-free
+(only `node:crypto`), at the cost of owning ~60 lines of signing code the SDK would
+otherwise carry. A deliberate trade for a tool this small, not a constraint worth escalating.
 
 ### Where the libs live
 
@@ -873,21 +974,37 @@ duplicating every method signature would not create a real substitution boundary
 the required class methods with `Pick<Repository, ...>`. Interfaces remain at genuinely
 swappable infrastructure ports such as `Database`, `EventBus`, and `OutboxSource`.
 
-Repository ownership follows the owning domain module. `FeedPostRepository` and its table
-schema live in `FeedModule`, not `PointModule`; `OutboxRepository` similarly lives in
-`OutboxModule`. `PointModule` imports those modules and injects their exported repositories, so
-their writes still participate in the same transaction as the budget, transfer, and ledger.
+Repository ownership follows the owning domain module. `FeedPostRepository`/`FeedMediaRepository`
+and their table schemas live in `FeedModule`; `PointTransferRepository`/`PointLedgerRepository`/
+`SenderBalanceRepository` live in `PointModule`; `OutboxRepository` lives in `OutboxModule`.
+Since §4's split, `feed_post` is the primary object of the send-kudo use case, so `FeedModule`
+owns the orchestration (`SendKudoService`) and imports `PointModule` — the reverse of the
+direction it used to be. Inside `SendKudoService`, calling `FeedPostService` is intra-module
+(feed calling its own service directly); calling `PointTransferService.reserveBudget()` is the
+*one* cross-module call in Phase 1, and it's deliberately narrow — feed asks point to do one
+thing (reserve, throw if it can't) and never touches `SenderBalanceRepository`, or any other
+point-owned repository, itself. Both services pick up the ambient transaction via the same
+`AsyncLocalStorage` binding every repository uses, so calling `reserveBudget()` from inside
+`SendKudoService`'s own `unitOfWork.run()` is enough for the reserve to commit atomically with
+the `feed_post` write, exactly as if it were one repository call. `OutboxRepository` is
+injected directly into both `SendKudoService` and `PointTransferService`, since enqueueing
+doesn't need an orchestration layer to encapsulate.
 
-The service writes the whole atomic core inside one `run`:
+`SendKudoService` writes the whole atomic core inside one `run` — Phase 1 only, per §4's
+split; `ledger.appendDebit`/`transfers.create` now live in `PointTransferService
+.reserveKudoPoints()`, itself wrapped in `KudoReservedListener`'s own `run()`:
 
 ```ts
+// feed/services/send-kudo.service.ts
 await uow.run(async () => {
-  if (!await budget.reserve(senderId, points)) throw new InsufficientBudgetError();
-  await ledger.appendDebit({ userId: senderId, points, type: 'giving_spend' });
-  const t = await transfers.create({ senderId, recipientId, points, status: 'pending' });
-  await posts.create({ authorId: senderId, transferId: t.id, status: 'pending' });
-  await outbox.enqueue('kudo.debited', { /* ... */ });
-  return t;
+  const existing = await feedPosts.findByIdempotencyKey(idempotencyKey);
+  if (existing) return existing;
+  await pointTransfers.reserveBudget(senderId, points);   // the one cross-module call; throws on failure
+  const transferId = randomUUID();
+  const postId = randomUUID();
+  await feedPosts.createPendingPost({ postId, authorId: senderId, transferId, idempotencyKey });
+  await outbox.enqueue('kudo.reserved', { transferId, postId, senderId, recipientId, points, /* ... */ });
+  return { transferId, postId, status: 'pending' };
 });
 ```
 
@@ -989,9 +1106,11 @@ kudos-api/
 │   │   ├── infra/                 # composition seam — ONLY place tool factories are called
 │   │   ├── shared/                # errors, filters, decorators
 │   │   ├── modules/               # one self-contained vertical slice per business domain
-│   │   │   ├── point/             # budgets, transfers, ledger, PointTransferService.sendKudo
+│   │   │   ├── point/             # budgets, transfers, ledger; reserveBudget() is the only
+│   │   │   │                      # surface feed calls into — sendKudo lives in feed (§4, §12)
 │   │   │   ├── outbox/            # owns outbox schema, source port binding, and DB repository
-│   │   │   ├── feed/
+│   │   │   ├── feed/              # feed_post is the primary send-kudo object; SendKudoService,
+│   │   │   │                      # KudoController
 │   │   │   ├── reaction/
 │   │   │   ├── reward/
 │   │   │   ├── notification/
@@ -1095,21 +1214,55 @@ Stated explicitly so each reads as a *choice*, not a gap:
   (`KudoDebitedListener`, `KudoCreditedListener`), not the action they perform — each module
   can have its own same-named listener for a topic it cares about, since the class lives in,
   and is scoped to, that module.
-- **Redemption reuses `ReceiverBalanceService.syncFromLedger()` for its reconciliation step,
-  exactly as predicted above — no separate lock, no separate fold logic.**
-  `RedeemRewardService.redeemReward()` calls it inside its own `unitOfWork.run()`; since
-  `syncFromLedger` already took `FOR UPDATE` on the user's `receiver_balance` row and returns
-  the authoritative `earned_points`, the redeem transaction never needs a second lock
-  acquisition — it's the same row, same transaction, same lock, held continuously from the
-  reconcile through the eventual `applyDelta(-cost)`. `PointLedgerRepository.appendRedeemDebit`
-  returns the new ledger row's id so that final `applyDelta` call can advance the checkpoint
-  too, exactly like the credit path — a redemption's own debit is never re-summed by a later
-  fold. Order matches §6's pseudocode precisely: idempotency check → reward exists/active →
-  balance reconciled and checked → stock reserved (only if finite) → redemption + ledger +
-  balance written together. `reward` module reaches directly into `point`'s repositories/
-  service for this (not via events) — the same reasoning as `sendKudo` creating `feed_post`
-  inline (§12): this is one atomic transaction protecting one invariant, not async fan-out, so
-  it doesn't belong on the event bus.
+- **Redemption's invariant core moved from an app-orchestrated transaction into a single
+  Postgres function, `redeem_reward()`, called through a `RewardRedemptionPort`.** The
+  original version (predicted above, and initially built that way) reused
+  `ReceiverBalanceService.syncFromLedger()` under `unitOfWork.run()` across ~8 separate
+  statements — correct, but every one of those was a network round trip. `redeem_reward()`
+  collapses idempotent-replay check, reward re-validation, the atomic balance/stock
+  reserves, and the redemption + ledger + checkpoint + outbox writes into one call. This is
+  a deliberate, named exception to "no vendor-specific business logic in the app layer"
+  (§11/§14) — made reversible by `RewardRedemptionPort`: its `redeemAtomically()` method
+  documents the exact domain errors any implementation must throw (`@throws` on the
+  interface) as the actual contract; `RedemptionRepository`'s translation of the function's
+  raw Postgres codes (`KU001`-`KU005`) is just *this* implementation honoring it — a future
+  non-Postgres implementation would throw those errors directly, no codes involved.
+  `RedeemRewardService` now only does two side-effect-free reads (idempotency pre-check,
+  reward pre-check, both purely for fast/friendly failures) before the one atomic call — it
+  no longer opens a transaction itself, and no longer depends on `PointLedgerRepository`,
+  `ReceiverBalanceRepository`, or `OutboxRepository` at all. `reward` still reaches past
+  events into `point`'s tables (now from inside the function, not from application code) —
+  same reasoning as before: one atomic transaction protecting one invariant, not async
+  fan-out. One known, accepted gap carried over unchanged: two concurrent calls with the
+  *same* idempotency key can both pass the replay check and race the insert; the loser gets
+  a raw `23505` rather than a graceful "already redeemed" response. The `UNIQUE` constraint
+  still prevents an actual double-spend — it only means that one response is uglier than it
+  should be. Not solved, for the same reason nothing else in §10's error-translation layer is
+  fully wired up yet: proportionate to an internal tool at modest QPS, not a correctness gap.
+- **Media support ships image-only; video (a REQUIRED capability, ≤3 min per the product
+  spec — not just a nice-to-have) is explicitly deferred, not dropped.** `feed_media.kind`'s
+  `CHECK` is narrowed to `'image'` only, and the `POST /media/presign` endpoint rejects any
+  non-`image/*` `contentType` before it ever reaches the storage tool. Concretely, this is
+  what's *not* built yet: the async video-processing job itself (§4 Phase 2's "validates
+  ≤3 min, transcodes, marks ready/rejected") has no implementation, because there is nothing
+  for it to consume — video is rejected before a `feed_media` row can ever exist for it. This
+  is why `status` and `duration_ms` stay in the schema unused (§3): narrowing them too would
+  mean a second migration to widen them back when video ships, whereas `kind`'s narrowing is
+  a real, cheap-to-lift-later behavior gate, not a storage cost. Images need no
+  validate/transcode step at all, so their `feed_media` row is written straight to `ready`
+  inside `sendKudo`'s existing Phase-1 transaction (`FeedMediaRepository.create()`) — there is
+  no `pending → ready` transition to wait on, and consequently no `media.uploaded`-style
+  outbox event either; nothing async needs to react to an image landing.
+- **`storage`'s presign step (Phase 0) is intentionally stateless and re-validated by
+  `sendKudo`, not trusted blindly.** The client presigns, uploads directly to MinIO, then
+  passes the resulting `objectKey`/`domain` into the *existing* send-kudo request rather than
+  a separate "attach media" call — there's no independent `feed_media` lifecycle to
+  synchronize with the post's, so reusing Phase 1's transaction is strictly simpler than
+  inventing a second one. This does mean a presigned upload that's never actually completed
+  (client abandons the flow) leaves no trace anywhere — nothing to clean up, since nothing
+  was ever written. The converse — a client claiming an `objectKey` it never uploaded to —
+  is accepted as a known gap for the same reason `redeem_reward()`'s idempotency race is: an
+  internal tool at modest QPS, not adversarial input from the public.
 
 ### One-line summary
 

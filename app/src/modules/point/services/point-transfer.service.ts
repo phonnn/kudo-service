@@ -1,31 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { UnitOfWork } from '@kudo/database';
-import { randomUUID } from 'node:crypto';
-import { FeedPostRepository } from '../../feed';
 import { OutboxRepository } from '../../outbox';
-import type { CoreValue } from '../dto/send-kudo.dto';
 import {
   KUDO_CREDITED,
   KUDO_DEBITED,
+  KUDO_RESERVATION_FAILED,
   type KudoCreditedPayload,
   type KudoDebitedPayload,
+  type KudoReservationFailedPayload,
+  type KudoReservedPayload,
 } from '../events/kudo.events';
 import { InsufficientBudgetError } from '../errors/insufficient-budget.error';
-import { SelfRecognitionError } from '../errors/self-recognition.error';
 import { SenderNotProvisionedError } from '../errors/sender-not-provisioned.error';
-import { validatePoints } from '../helpers/points.helper';
-import type { CreatedKudo } from '../interfaces/created-kudo.interface';
 import { PointLedgerRepository } from '../repositories/point-ledger.repository';
 import { PointTransferRepository } from '../repositories/point-transfer.repository';
 import { SenderBalanceRepository } from '../repositories/sender-balance.repository';
-export interface SendKudoCommand {
-  senderId: string;
-  recipientId: string;
-  points: number;
-  coreValue: CoreValue;
-  description: string;
-  idempotencyKey: string;
-}
+
 @Injectable()
 export class PointTransferService {
   constructor(
@@ -33,91 +23,95 @@ export class PointTransferService {
     private readonly senderBalances: SenderBalanceRepository,
     private readonly pointTransfers: PointTransferRepository,
     private readonly pointLedger: PointLedgerRepository,
-    private readonly feedPosts: FeedPostRepository,
     private readonly outbox: OutboxRepository,
   ) {}
-  sendKudo(command: SendKudoCommand): Promise<CreatedKudo> {
-    if (command.senderId === command.recipientId) {
-      throw new SelfRecognitionError();
+
+  // The one synchronous, fail-fast call `feed`'s SendKudoService makes into
+  // `point` (§4 Phase 1). This is a quick, unlocked READ — not the
+  // authoritative gate. The real atomic reserve happens later, in
+  // reserveKudoPoints() (Phase 1.5), in the same transaction as the ledger
+  // debit, so "balance moves with the ledger" stays true. This pre-check
+  // exists purely so an obviously-doomed request fails fast with an honest
+  // error instead of paying for a round trip through the event chain first.
+  async reserveBudget(senderId: string, points: number): Promise<void> {
+    const remaining = await this.senderBalances.getRemaining(senderId);
+    if (remaining === null) {
+      throw new SenderNotProvisionedError();
     }
+    if (remaining < points) {
+      throw new InsufficientBudgetError();
+    }
+  }
 
-    validatePoints(command.points);
+  // Phase 1.5 (§4): reacts to kudo.reserved. The idempotency check comes
+  // first so a redelivery after this already fully succeeded can't
+  // double-reserve — reserve() itself has no idea about idempotency keys,
+  // only findByIdempotencyKey does. If the atomic reserve then fails, that
+  // means Phase 1's pre-check went stale (a real race, not a request-time
+  // error the sender saw synchronously) — this gives up on this specific
+  // kudo rather than retrying indefinitely, since a stale budget check
+  // rarely un-stales itself. feed's own listener reacts to
+  // kudo.reservation-failed by marking its post 'failed'; point never
+  // touches feed_post directly (§12).
+  reserveKudoPoints(payload: KudoReservedPayload): Promise<void> {
     return this.unitOfWork.run(async () => {
-      const existingTransfer = await this.pointTransfers.findByIdempotencyKey(
-        command.idempotencyKey,
+      const existing = await this.pointTransfers.findByIdempotencyKey(
+        payload.idempotencyKey,
       );
-
-      if (existingTransfer?.status === 'pending') {
-        const existingPost = await this.feedPosts.findByTransferId(
-          existingTransfer.id,
-        );
-
-        if (existingPost) {
-          return {
-            transferId: existingTransfer.id,
-            postId: existingPost.id,
-            status: 'pending',
-          };
-        }
+      if (existing) {
+        return; // at-least-once redelivery — already fully processed
       }
 
       const reserved = await this.senderBalances.reserve(
-        command.senderId,
-        command.points,
+        payload.senderId,
+        payload.points,
       );
 
       if (!reserved) {
-        const senderProvisioned = await this.senderBalances.exists(
-          command.senderId,
-        );
-
-        if (!senderProvisioned) {
-          throw new SenderNotProvisionedError();
-        }
-
-        throw new InsufficientBudgetError();
+        const reservationFailed: KudoReservationFailedPayload = {
+          transferId: payload.transferId,
+        };
+        await this.outbox.enqueue({
+          id: `kudo:${payload.transferId}:reservation-failed`,
+          topic: KUDO_RESERVATION_FAILED,
+          payload: reservationFailed as unknown as Record<string, unknown>,
+        });
+        return;
       }
 
-      const transferId = randomUUID();
-      const postId = randomUUID();
-      await this.pointTransfers.create({
-        id: transferId,
-        senderId: command.senderId,
-        recipientId: command.recipientId,
-        points: command.points,
-        coreValue: command.coreValue,
-        idempotencyKey: command.idempotencyKey,
+      const created = await this.pointTransfers.create({
+        id: payload.transferId,
+        senderId: payload.senderId,
+        recipientId: payload.recipientId,
+        points: payload.points,
+        coreValue: payload.coreValue,
+        idempotencyKey: payload.idempotencyKey,
       });
+
+      if (!created) {
+        return; // belt-and-suspenders — findByIdempotencyKey above already guards this
+      }
 
       await this.pointLedger.appendGivingDebit({
-        userId: command.senderId,
-        points: command.points,
-        transferId,
-        idempotencyKey: command.idempotencyKey,
-      });
-
-      await this.feedPosts.create({
-        id: postId,
-        authorId: command.senderId,
-        description: command.description,
-        transferId,
+        userId: payload.senderId,
+        points: payload.points,
+        transferId: payload.transferId,
+        idempotencyKey: payload.idempotencyKey,
       });
 
       const kudoDebited: KudoDebitedPayload = {
-        transferId,
-        postId,
-        senderId: command.senderId,
-        recipientId: command.recipientId,
-        points: command.points,
+        transferId: payload.transferId,
+        postId: payload.postId,
+        senderId: payload.senderId,
+        recipientId: payload.recipientId,
+        points: payload.points,
       };
 
       await this.outbox.enqueue({
-        id: transferId,
+        id: payload.transferId,
         topic: KUDO_DEBITED,
         payload: kudoDebited as unknown as Record<string, unknown>,
       });
-
-      return { transferId, postId, status: 'pending' };
     });
   }
 

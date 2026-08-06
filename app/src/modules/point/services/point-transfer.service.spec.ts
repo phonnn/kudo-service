@@ -1,93 +1,108 @@
-import { CoreValue } from '../dto/send-kudo.dto';
 import type { UnitOfWork } from '@kudo/database';
+import { CoreValue } from '../dto/core-value.enum';
 import { InsufficientBudgetError } from '../errors/insufficient-budget.error';
-import { SelfRecognitionError } from '../errors/self-recognition.error';
 import { SenderNotProvisionedError } from '../errors/sender-not-provisioned.error';
-import type { FeedPostRepository } from '../../feed';
 import type { OutboxRepository } from '../../outbox';
-import type { KudoDebitedPayload } from '../events/kudo.events';
+import type {
+  KudoDebitedPayload,
+  KudoReservedPayload,
+} from '../events/kudo.events';
 import type { PointLedgerRepository } from '../repositories/point-ledger.repository';
 import type { PointTransferRepository } from '../repositories/point-transfer.repository';
 import type { SenderBalanceRepository } from '../repositories/sender-balance.repository';
 import { PointTransferService } from './point-transfer.service';
 
-/* eslint-disable @typescript-eslint/unbound-method */
-
 describe('PointTransferService', () => {
-  describe('sendKudo', () => {
-    const command = {
-      senderId: 'sender',
-      recipientId: 'recipient',
-      points: 20,
-      coreValue: CoreValue.TEAMWORK,
-      description: 'Great job',
-      idempotencyKey: 'request-1',
-    };
-
-    it('writes every table through its repository', async () => {
+  describe('reserveBudget', () => {
+    it('passes when the sender has enough remaining balance', async () => {
       const repositories = createRepositories();
-      const result = await createService(repositories).sendKudo(command);
-      expect(repositories.senderBalances.reserve).toHaveBeenCalledWith(
+      await createService(repositories).reserveBudget('sender', 20);
+
+      expect(repositories.senderBalances.getRemaining).toHaveBeenCalledWith(
         'sender',
-        20,
       );
-      expect(repositories.pointTransfers.create).toHaveBeenCalled();
-      expect(repositories.pointLedger.appendGivingDebit).toHaveBeenCalled();
-      expect(repositories.feedPosts.create).toHaveBeenCalled();
-      expect(repositories.outbox.enqueue).toHaveBeenCalled();
-      expect(result.status).toBe('pending');
-    });
-
-    it('returns the existing transfer and post for an idempotent retry', async () => {
-      const repositories = createRepositories();
-      repositories.pointTransfers.findByIdempotencyKey.mockResolvedValue({
-        id: 'transfer',
-        status: 'pending',
-      });
-      repositories.feedPosts.findByTransferId.mockResolvedValue({
-        id: 'post',
-        status: 'pending',
-      });
-      await expect(
-        createService(repositories).sendKudo(command),
-      ).resolves.toEqual({
-        transferId: 'transfer',
-        postId: 'post',
-        status: 'pending',
-      });
-      expect(repositories.senderBalances.reserve).not.toHaveBeenCalled();
     });
 
     it('rejects insufficient budget when the sender is provisioned but low on budget', async () => {
       const repositories = createRepositories();
-      repositories.senderBalances.reserve.mockResolvedValue(false);
-      repositories.senderBalances.exists.mockResolvedValue(true);
+      repositories.senderBalances.getRemaining.mockResolvedValue(10);
+
       await expect(
-        createService(repositories).sendKudo(command),
+        createService(repositories).reserveBudget('sender', 20),
       ).rejects.toThrow(InsufficientBudgetError);
-      expect(repositories.pointTransfers.create).not.toHaveBeenCalled();
     });
 
     it('throws when the sender has never been provisioned', async () => {
       const repositories = createRepositories();
-      repositories.senderBalances.reserve.mockResolvedValue(false);
-      repositories.senderBalances.exists.mockResolvedValue(false);
+      repositories.senderBalances.getRemaining.mockResolvedValue(null);
+
       await expect(
-        createService(repositories).sendKudo(command),
+        createService(repositories).reserveBudget('sender', 20),
       ).rejects.toThrow(SenderNotProvisionedError);
-      expect(repositories.pointTransfers.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reserveKudoPoints', () => {
+    const payload: KudoReservedPayload = {
+      transferId: 'transfer-1',
+      postId: 'post-1',
+      senderId: 'sender',
+      recipientId: 'recipient',
+      points: 20,
+      coreValue: CoreValue.TEAMWORK,
+      idempotencyKey: 'request-1',
+    };
+
+    it('reserves atomically, creates the transfer, appends the ledger debit, and enqueues kudo.debited', async () => {
+      const repositories = createRepositories();
+      await createService(repositories).reserveKudoPoints(payload);
+
+      expect(repositories.senderBalances.reserve).toHaveBeenCalledWith(
+        'sender',
+        20,
+      );
+      expect(repositories.pointTransfers.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'transfer-1',
+          idempotencyKey: 'request-1',
+        }),
+      );
+      expect(repositories.pointLedger.appendGivingDebit).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'sender', points: 20 }),
+      );
+      expect(repositories.outbox.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ topic: 'kudo.debited' }),
+      );
     });
 
-    it('rejects self recognition before opening a transaction', () => {
+    it('is a no-op on redelivery once this idempotency key was already fully processed', async () => {
       const repositories = createRepositories();
-      const uow = { run: jest.fn() } as unknown as UnitOfWork;
-      expect(() =>
-        createService(repositories, uow).sendKudo({
-          ...command,
-          recipientId: 'sender',
+      repositories.pointTransfers.findByIdempotencyKey.mockResolvedValue({
+        id: 'transfer-1',
+        status: 'pending',
+      });
+
+      await createService(repositories).reserveKudoPoints(payload);
+
+      expect(repositories.senderBalances.reserve).not.toHaveBeenCalled();
+      expect(repositories.pointLedger.appendGivingDebit).not.toHaveBeenCalled();
+      expect(repositories.outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('gives up and enqueues kudo.reservation-failed when the atomic reserve loses the race', async () => {
+      const repositories = createRepositories();
+      repositories.senderBalances.reserve.mockResolvedValue(false);
+
+      await createService(repositories).reserveKudoPoints(payload);
+
+      expect(repositories.pointTransfers.create).not.toHaveBeenCalled();
+      expect(repositories.pointLedger.appendGivingDebit).not.toHaveBeenCalled();
+      expect(repositories.outbox.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          topic: 'kudo.reservation-failed',
+          payload: { transferId: 'transfer-1' },
         }),
-      ).toThrow(SelfRecognitionError);
-      expect(uow.run).not.toHaveBeenCalled();
+      );
     });
   });
 
@@ -131,7 +146,7 @@ describe('PointTransferService', () => {
 
 interface MockRepositories {
   senderBalances: jest.Mocked<
-    Pick<SenderBalanceRepository, 'reserve' | 'exists'>
+    Pick<SenderBalanceRepository, 'getRemaining' | 'reserve'>
   >;
   pointTransfers: jest.Mocked<
     Pick<
@@ -142,12 +157,6 @@ interface MockRepositories {
   pointLedger: jest.Mocked<
     Pick<PointLedgerRepository, 'appendGivingDebit' | 'appendEarnCredit'>
   >;
-  feedPosts: jest.Mocked<
-    Pick<
-      FeedPostRepository,
-      'findByTransferId' | 'create' | 'publishByTransferId'
-    >
-  >;
   outbox: jest.Mocked<
     Pick<OutboxRepository, 'enqueue' | 'nextBatch' | 'markPublished'>
   >;
@@ -156,20 +165,15 @@ interface MockRepositories {
 function createRepositories(): MockRepositories {
   return {
     senderBalances: {
+      getRemaining: jest.fn().mockResolvedValue(100),
       reserve: jest.fn().mockResolvedValue(true),
-      exists: jest.fn().mockResolvedValue(true),
     },
     pointTransfers: {
       findByIdempotencyKey: jest.fn().mockResolvedValue(null),
-      create: jest.fn(),
+      create: jest.fn().mockResolvedValue(true),
       markCompleted: jest.fn(),
     },
     pointLedger: { appendGivingDebit: jest.fn(), appendEarnCredit: jest.fn() },
-    feedPosts: {
-      findByTransferId: jest.fn().mockResolvedValue(null),
-      create: jest.fn(),
-      publishByTransferId: jest.fn(),
-    },
     outbox: {
       enqueue: jest.fn(),
       nextBatch: jest.fn(),
@@ -189,7 +193,6 @@ function createService(
     repositories.senderBalances as unknown as SenderBalanceRepository,
     repositories.pointTransfers as unknown as PointTransferRepository,
     repositories.pointLedger as unknown as PointLedgerRepository,
-    repositories.feedPosts as unknown as FeedPostRepository,
     repositories.outbox as unknown as OutboxRepository,
   );
 }

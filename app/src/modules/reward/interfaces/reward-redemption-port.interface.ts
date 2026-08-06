@@ -12,7 +12,7 @@ export interface RedeemAtomicallyParams {
 // The seam RedeemRewardService depends on instead of RedemptionRepository
 // directly. RedemptionRepository's stored-procedure call (redeem_reward(),
 // see its migration) is today's only implementation of redeemAtomically()
-// A future alternative (e.g. the plain multi-statement-transaction version 
+// A future alternative (e.g. the plain multi-statement-transaction version
 // this replaced) would implement the same contract and swap in via
 // reward.module.ts's provider binding, with no change to the service.
 //
