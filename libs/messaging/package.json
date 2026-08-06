@@ -2,6 +2,9 @@
   "name": "@kudo/messaging",
   "version": "0.0.1",
   "private": true,
-  "main": "src/index.ts",
-  "dependencies": { "redis": "^5.8.1" }
+  "main": "../../dist/libs/messaging/src/index.js",
+  "types": "src/index.ts",
+  "dependencies": {
+    "redis": "^5.8.1"
+  }
 }

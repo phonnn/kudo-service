@@ -4,7 +4,9 @@
   "description": "",
   "author": "",
   "private": true,
-  "workspaces": ["libs/*"],
+  "workspaces": [
+    "libs/*"
+  ],
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",

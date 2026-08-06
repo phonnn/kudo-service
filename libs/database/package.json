@@ -2,7 +2,13 @@
   "name": "@kudo/database",
   "version": "0.0.1",
   "private": true,
-  "main": "src/index.ts",
-  "dependencies": { "kysely": "^0.28.5", "pg": "^8.16.3" },
-  "devDependencies": { "@types/pg": "^8.15.5" }
+  "main": "../../dist/libs/database/src/index.js",
+  "types": "src/index.ts",
+  "dependencies": {
+    "kysely": "^0.28.5",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.5"
+  }
 }
