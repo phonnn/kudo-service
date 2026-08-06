@@ -40,20 +40,4 @@ export class RewardRepository {
       active: row.active,
     };
   }
-
-  // atomic conditional decrement — mirrors SenderBalanceRepository.reserve().
-  // Only call for finite-stock rewards (stock !== null); a NULL stock row
-  // never matches `stock > 0`, so this would always fail for unlimited rewards.
-  async reserveStock(id: string): Promise<boolean> {
-    const result = await this.database
-      .client<RewardDatabaseSchema>()
-      .updateTable('reward')
-      .set((eb) => ({ stock: eb('stock', '-', 1) }))
-      .where('id', '=', id)
-      .where('stock', '>', 0)
-      .returning('stock')
-      .executeTakeFirst();
-
-    return result !== undefined;
-  }
 }
