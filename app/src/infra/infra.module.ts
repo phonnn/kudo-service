@@ -1,11 +1,13 @@
 import { Global, Module } from '@nestjs/common';
 import { createMessaging } from '@kudo/messaging';
 import { createDatabase, type Database, UnitOfWork } from '@kudo/database';
-import { DATABASE, EVENT_BUS } from './token.constant';
+import { createStorage } from '@kudo/storage';
+import { DATABASE, EVENT_BUS, STORAGE } from './token.constant';
 import {
   ConfigModule,
   DatabaseConfigService,
   MessagingConfigService,
+  StorageConfigService,
 } from '../config';
 
 @Global()
@@ -29,7 +31,13 @@ import {
       useFactory: (messagingConfigService: MessagingConfigService) =>
         createMessaging(messagingConfigService.getAll()),
     },
+    {
+      provide: STORAGE,
+      inject: [StorageConfigService],
+      useFactory: (storageConfigService: StorageConfigService) =>
+        createStorage(storageConfigService.getAll()),
+    },
   ],
-  exports: [DATABASE, EVENT_BUS, UnitOfWork],
+  exports: [DATABASE, EVENT_BUS, STORAGE, UnitOfWork],
 })
 export class InfraModule {}

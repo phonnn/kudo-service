@@ -1,0 +1,7 @@
+{
+  "name": "@kudo/storage",
+  "version": "0.0.1",
+  "private": true,
+  "main": "../../dist/libs/storage/src/index.js",
+  "types": "src/index.ts"
+}

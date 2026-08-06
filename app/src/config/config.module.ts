@@ -4,11 +4,13 @@ import type { ZodTypeAny } from 'zod';
 import { appEnvSchema, AppConfig } from './app';
 import { databaseEnvSchema, DatabaseConfigService } from './database';
 import { messagingEnvSchema, MessagingConfigService } from './messaging';
+import { storageEnvSchema, StorageConfigService } from './storage';
 
 const envSchemas: ZodTypeAny[] = [
   appEnvSchema,
   databaseEnvSchema,
   messagingEnvSchema,
+  storageEnvSchema,
 ];
 
 function validateEnv(config: Record<string, unknown>): Record<string, unknown> {
@@ -43,7 +45,17 @@ function validateEnv(config: Record<string, unknown>): Record<string, unknown> {
       validate: validateEnv,
     }),
   ],
-  providers: [AppConfig, DatabaseConfigService, MessagingConfigService],
-  exports: [AppConfig, DatabaseConfigService, MessagingConfigService],
+  providers: [
+    AppConfig,
+    DatabaseConfigService,
+    MessagingConfigService,
+    StorageConfigService,
+  ],
+  exports: [
+    AppConfig,
+    DatabaseConfigService,
+    MessagingConfigService,
+    StorageConfigService,
+  ],
 })
 export class ConfigModule {}
