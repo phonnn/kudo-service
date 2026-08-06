@@ -256,9 +256,9 @@ server proxies through).
 
 ### Phase 1 — The send request (ONE small synchronous transaction)
 
-Owned by `feed`'s `SendKudoService` (§12) — `point` is asked to do exactly one synchronous
-thing here (`PointTransferService.reserveBudget()`), everything else in this transaction is
-feed's own writes.
+Owned by `feed`'s `FeedPostService.sendKudo()` (§12) — `point` is asked to do exactly one
+synchronous thing here (`PointTransferService.reserveBudget()`), everything else in this
+transaction is feed's own writes.
 
 ```
 BEGIN
@@ -978,34 +978,37 @@ Repository ownership follows the owning domain module. `FeedPostRepository`/`Fee
 and their table schemas live in `FeedModule`; `PointTransferRepository`/`PointLedgerRepository`/
 `SenderBalanceRepository` live in `PointModule`; `OutboxRepository` lives in `OutboxModule`.
 Since §4's split, `feed_post` is the primary object of the send-kudo use case, so `FeedModule`
-owns the orchestration (`SendKudoService`) and imports `PointModule` — the reverse of the
-direction it used to be. Inside `SendKudoService`, calling `FeedPostService` is intra-module
-(feed calling its own service directly); calling `PointTransferService.reserveBudget()` is the
-*one* cross-module call in Phase 1, and it's deliberately narrow — feed asks point to do one
-thing (reserve, throw if it can't) and never touches `SenderBalanceRepository`, or any other
-point-owned repository, itself. Both services pick up the ambient transaction via the same
-`AsyncLocalStorage` binding every repository uses, so calling `reserveBudget()` from inside
-`SendKudoService`'s own `unitOfWork.run()` is enough for the reserve to commit atomically with
-the `feed_post` write, exactly as if it were one repository call. `OutboxRepository` is
-injected directly into both `SendKudoService` and `PointTransferService`, since enqueueing
-doesn't need an orchestration layer to encapsulate.
+owns the orchestration and imports `PointModule` — the reverse of the direction it used to be.
+`FeedPostService` owns both what a post *is* (`findByIdempotencyKey`, `createPendingPost`) and
+the send-kudo use case itself (`sendKudo()`) as methods on one class — `sendKudo()` calls
+`this.createPendingPost()` directly, no separate orchestration service on top. Calling
+`PointTransferService.reserveBudget()` is the *one* cross-module call in Phase 1, and it's
+deliberately narrow — feed asks point to do one thing (reserve, throw if it can't) and never
+touches `SenderBalanceRepository`, or any other point-owned repository, itself. Both services
+pick up the ambient transaction via the same `AsyncLocalStorage` binding every repository
+uses, so calling `reserveBudget()` from inside `FeedPostService`'s own `unitOfWork.run()` is
+enough for the reserve to commit atomically with the `feed_post` write, exactly as if it were
+one repository call. `OutboxRepository` is injected directly into both `FeedPostService` and
+`PointTransferService`, since enqueueing doesn't need an orchestration layer to encapsulate.
 
-`SendKudoService` writes the whole atomic core inside one `run` — Phase 1 only, per §4's
-split; `ledger.appendDebit`/`transfers.create` now live in `PointTransferService
+`FeedPostService.sendKudo()` writes the whole atomic core inside one `run` — Phase 1 only,
+per §4's split; `ledger.appendDebit`/`transfers.create` now live in `PointTransferService
 .reserveKudoPoints()`, itself wrapped in `KudoReservedListener`'s own `run()`:
 
 ```ts
-// feed/services/send-kudo.service.ts
-await uow.run(async () => {
-  const existing = await feedPosts.findByIdempotencyKey(idempotencyKey);
-  if (existing) return existing;
-  await pointTransfers.reserveBudget(senderId, points);   // the one cross-module call; throws on failure
-  const transferId = randomUUID();
-  const postId = randomUUID();
-  await feedPosts.createPendingPost({ postId, authorId: senderId, transferId, idempotencyKey });
-  await outbox.enqueue('kudo.reserved', { transferId, postId, senderId, recipientId, points, /* ... */ });
-  return { transferId, postId, status: 'pending' };
-});
+// feed/services/feed-post.service.ts
+sendKudo(command) {
+  return this.unitOfWork.run(async () => {
+    const existing = await this.findByIdempotencyKey(command.idempotencyKey);
+    if (existing) return existing;
+    await this.pointTransfers.reserveBudget(senderId, points);   // the one cross-module call; throws on failure
+    const transferId = randomUUID();
+    const postId = randomUUID();
+    await this.createPendingPost({ postId, authorId: senderId, transferId, idempotencyKey });
+    await this.outbox.enqueue('kudo.reserved', { transferId, postId, senderId, recipientId, points, /* ... */ });
+    return { transferId, postId, status: 'pending' };
+  });
+}
 ```
 
 **The invariant-bearing operations are repository *methods*, not primitives the caller
@@ -1109,8 +1112,8 @@ kudos-api/
 │   │   │   ├── point/             # budgets, transfers, ledger; reserveBudget() is the only
 │   │   │   │                      # surface feed calls into — sendKudo lives in feed (§4, §12)
 │   │   │   ├── outbox/            # owns outbox schema, source port binding, and DB repository
-│   │   │   ├── feed/              # feed_post is the primary send-kudo object; SendKudoService,
-│   │   │   │                      # KudoController
+│   │   │   ├── feed/              # feed_post is the primary send-kudo object; FeedPostService
+│   │   │   │                      # owns sendKudo() itself; controllers/{feed,media}.controller.ts
 │   │   │   ├── reaction/
 │   │   │   ├── reward/
 │   │   │   ├── notification/

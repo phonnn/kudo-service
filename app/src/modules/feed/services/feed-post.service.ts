@@ -1,5 +1,16 @@
 import { Injectable } from '@nestjs/common';
+import { UnitOfWork } from '@kudo/database';
 import { randomUUID } from 'node:crypto';
+import type { CoreValue } from '../../point/dto/core-value.enum';
+import {
+  KUDO_RESERVED,
+  type KudoReservedPayload,
+} from '../../point/events/kudo.events';
+import { SelfRecognitionError } from '../../point/errors/self-recognition.error';
+import { validatePoints } from '../../point/helpers/points.helper';
+import { PointTransferService } from '../../point/services/point-transfer.service';
+import { OutboxRepository } from '../../outbox';
+import type { CreatedKudo } from '../interfaces/created-kudo.interface';
 import { FeedMediaRepository } from '../repositories/feed-media.repository';
 import {
   FeedPostRepository,
@@ -20,17 +31,33 @@ export interface CreatePendingPostCommand {
   media?: CreatePendingPostMedia;
 }
 
-// Everything a caller outside `feed` needs from feed_post/feed_media,
-// behind one service — callers (currently only SendKudoService, its own
-// module) don't reach into FeedPostRepository/FeedMediaRepository directly
-// (§12: repository ownership follows the owning domain module). Listeners
-// inside `feed` itself (KudoCreditedListener, KudoReservationFailedListener)
-// use the repositories directly, same as any other intra-module access.
+export interface SendKudoCommand {
+  senderId: string;
+  recipientId: string;
+  points: number;
+  coreValue: CoreValue;
+  description: string;
+  idempotencyKey: string;
+  media?: CreatePendingPostMedia;
+}
+
+// Everything about feed_post/feed_media, including the send-kudo use case
+// itself (§4 Phase 1) — feed_post is the primary object, point_transfer is
+// attached to it, which is why the HTTP entry point and this orchestration
+// live in `feed`, not `point`. `point` is only asked to do the one
+// synchronous thing whose failure the caller must see (P4): reserve the
+// budget. Everything else about actually recording the transfer is
+// deferred to PointTransferService.reserveKudoPoints(), reacting to
+// kudo.reserved — `point` doesn't create feed_post, and this service
+// doesn't create point_transfer.
 @Injectable()
 export class FeedPostService {
   constructor(
+    private readonly unitOfWork: UnitOfWork,
     private readonly feedPosts: FeedPostRepository,
     private readonly feedMedia: FeedMediaRepository,
+    private readonly pointTransfers: PointTransferService,
+    private readonly outbox: OutboxRepository,
   ) {}
 
   // the primary idempotency guard for sendKudo (§4) — the post is the
@@ -63,5 +90,62 @@ export class FeedPostService {
         domain: command.media.domain,
       });
     }
+  }
+
+  sendKudo(command: SendKudoCommand): Promise<CreatedKudo> {
+    if (command.senderId === command.recipientId) {
+      throw new SelfRecognitionError();
+    }
+
+    validatePoints(command.points);
+    return this.unitOfWork.run(async () => {
+      const existingPost = await this.findByIdempotencyKey(
+        command.idempotencyKey,
+      );
+
+      if (existingPost) {
+        return {
+          transferId: existingPost.transferId,
+          postId: existingPost.id,
+          status: existingPost.status,
+        };
+      }
+
+      // the one synchronous, fail-fast call into `point` (§4 Phase 1) —
+      // participates in this same transaction, see reserveBudget()'s comment.
+      await this.pointTransfers.reserveBudget(command.senderId, command.points);
+
+      // minted now, before point_transfer exists — KudoReservedListener
+      // uses this same id when it eventually creates that row.
+      const transferId = randomUUID();
+      const postId = randomUUID();
+
+      await this.createPendingPost({
+        postId,
+        authorId: command.senderId,
+        description: command.description,
+        transferId,
+        idempotencyKey: command.idempotencyKey,
+        media: command.media,
+      });
+
+      const kudoReserved: KudoReservedPayload = {
+        transferId,
+        postId,
+        senderId: command.senderId,
+        recipientId: command.recipientId,
+        points: command.points,
+        coreValue: command.coreValue,
+        idempotencyKey: command.idempotencyKey,
+      };
+
+      await this.outbox.enqueue({
+        id: transferId,
+        topic: KUDO_RESERVED,
+        payload: kudoReserved as unknown as Record<string, unknown>,
+      });
+
+      return { transferId, postId, status: 'pending' };
+    });
   }
 }

@@ -17,13 +17,12 @@ export class KudoCreditedListener implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    await this.bus.subscribe(
-      KUDO_CREDITED,
-      CONSUMER_GROUP,
-      (event: DomainEvent) =>
-        this.feedPosts.publishByTransferId(
-          (event.payload as unknown as KudoCreditedPayload).transferId,
-        ),
+    await this.bus.subscribe(KUDO_CREDITED, CONSUMER_GROUP, (event) =>
+      this.handle(event as unknown as DomainEvent<KudoCreditedPayload>),
     );
+  }
+
+  private handle(event: DomainEvent<KudoCreditedPayload>): Promise<void> {
+    return this.feedPosts.publishByTransferId(event.payload.transferId);
   }
 }

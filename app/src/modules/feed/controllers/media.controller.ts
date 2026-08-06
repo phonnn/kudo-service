@@ -6,7 +6,7 @@ import {
   Post,
 } from '@nestjs/common';
 import type { PresignedUpload, Storage } from '@kudo/storage';
-import { STORAGE } from '../../infra/token.constant';
+import { STORAGE } from '../../../infra/token.constant';
 
 export interface PresignMediaUploadDto {
   contentType: string;

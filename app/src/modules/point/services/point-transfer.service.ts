@@ -26,8 +26,8 @@ export class PointTransferService {
     private readonly outbox: OutboxRepository,
   ) {}
 
-  // The one synchronous, fail-fast call `feed`'s SendKudoService makes into
-  // `point` (§4 Phase 1). This is a quick, unlocked READ — not the
+  // The one synchronous, fail-fast call `feed`'s FeedPostService.sendKudo()
+  // makes into `point` (§4 Phase 1). This is a quick, unlocked READ — not the
   // authoritative gate. The real atomic reserve happens later, in
   // reserveKudoPoints() (Phase 1.5), in the same transaction as the ledger
   // debit, so "balance moves with the ledger" stays true. This pre-check
