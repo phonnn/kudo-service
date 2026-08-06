@@ -8,6 +8,17 @@ export interface GivingDebitRecord {
   idempotencyKey: string;
 }
 
+export interface EarnCreditRecord {
+  userId: string;
+  points: number;
+  transferId: string;
+}
+
+export interface EarnedSince {
+  total: number;
+  maxId: number | null;
+}
+
 export interface PointLedgerDatabaseSchema {
   point_ledger: {
     id: Generated<number>;
@@ -39,5 +50,41 @@ export class PointLedgerRepository {
         idempotency_key: `kudo:${record.idempotencyKey}:debit`,
       })
       .execute();
+  }
+
+  // idempotent on (transferId,'earn') — safe for at-least-once redelivery of kudo.debited
+  async appendEarnCredit(record: EarnCreditRecord): Promise<void> {
+    await this.database
+      .client<PointLedgerDatabaseSchema>()
+      .insertInto('point_ledger')
+      .values({
+        user_id: record.userId,
+        delta: record.points,
+        ledger_type: 'earn',
+        ref_type: 'kudo',
+        ref_id: record.transferId,
+        idempotency_key: `kudo:${record.transferId}:credit`,
+      })
+      .onConflict((conflict) => conflict.column('idempotency_key').doNothing())
+      .execute();
+  }
+
+  async sumEarnedSince(userId: string, sinceId: number): Promise<EarnedSince> {
+    const { total, maxId } = await this.database
+      .client<PointLedgerDatabaseSchema>()
+      .selectFrom('point_ledger')
+      .select((eb) => [
+        eb.fn.coalesce(eb.fn.sum<number>('delta'), eb.lit(0)).as('total'),
+        eb.fn.max('id').as('maxId'),
+      ])
+      .where('user_id', '=', userId)
+      .where('ledger_type', '=', 'earn')
+      .where('id', '>', sinceId)
+      .executeTakeFirstOrThrow();
+
+    return {
+      total: Number(total),
+      maxId: maxId === null ? null : Number(maxId),
+    };
   }
 }

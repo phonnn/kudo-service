@@ -59,4 +59,15 @@ export class FeedPostRepository {
       })
       .execute();
   }
+
+  // only transitions from 'pending' — a redelivered kudo.debited is a safe no-op
+  async publishByTransferId(transferId: string): Promise<void> {
+    await this.database
+      .client<FeedPostDatabaseSchema>()
+      .updateTable('feed_post')
+      .set({ status: 'published' })
+      .where('point_transfer_id', '=', transferId)
+      .where('status', '=', 'pending')
+      .execute();
+  }
 }

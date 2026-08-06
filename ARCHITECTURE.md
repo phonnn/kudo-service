@@ -99,7 +99,25 @@ enacts the choice internally. Domain code never sees a vendor name.
 ## 3. Data model
 
 Two worlds, linked by a nullable FK: the **financial** world (money, audited, immutable)
-and the **social** world (posts, editable, soft-deletable).
+and the **social** world (posts, editable, soft-deletable). A third, small **identity**
+table anchors both — every `user_id` referenced throughout this document is a FK to it.
+
+### Identity
+
+```
+users                                -- JIT-provisioned from the auth tool's Principal (§12)
+  id                uuid pk
+  external_subject  text unique      -- the IdP's stable subject ('sub' claim); OIDC today
+  email             text
+  name              text
+  created_at        timestamptz
+```
+
+The app never generates a `users` row from a signup form — it's created the first time a
+given `external_subject` is seen from a *verified* `Principal` (§11/§12). `id` (not
+`external_subject`) is what every other table's `user_id` FK points to, so the rest of the
+schema stays provider-agnostic: swapping the `auth` tool's provider (OIDC → SAML) never
+touches `point_ledger`, `sender_balance`, etc.
 
 ### Financial
 
@@ -115,17 +133,14 @@ point_ledger (C)                    -- SOURCE OF TRUTH, append-only
   created_at    timestamptz
   index (user_id, ledger_type, created_at)
 
-sender_balance (A)                  -- giving-budget projection; one row per user per month
-  user_id       fk
-  period        text                -- e.g. '2026-08'
-  spent         int
-  pk (user_id, period)
+sender_balance (A)                  -- giving-budget projection; one row per user
+  user_id       pk fk
+  remaining     int                 -- points left to give this month; refilled to 200 on the 1st
 
 receiver_balance (B)                -- earned/usable projection
-  user_id       pk fk
-  earned_points int
-  version       int                 -- optimistic-lock aid
-  updated_at
+  user_id         pk fk
+  earned_points   int
+  last_ledger_id  bigint             -- checkpoint; fold only sums point_ledger rows past this
 
 point_transfer                      -- one logical send; the money record only
   id            uuid pk
@@ -223,7 +238,7 @@ server / avoid OOM" answer).
 
 ```
 BEGIN
-  UPDATE A(sender) WHERE spent + :points <= 200
+  UPDATE A(sender) SET remaining -= :points WHERE remaining >= :points
   INSERT point_ledger: debit(sender, giving_spend, idempotency_key)   -- then ledger
   INSERT point_transfer(status='pending')
   INSERT feed_post(status='pending', point_transfer_id)
@@ -574,6 +589,7 @@ AppError (base)  { code, message, httpStatus, retryable, context, cause? }
   ├─ DomainError            -- business-rule violations (client "fault"), not retryable
   │    InsufficientBudgetError (409), InsufficientBalanceError (409),
   │    SelfRecognitionError (422), InvalidPointsError (422),
+  │    SenderNotProvisionedError (404), RecipientNotProvisionedError (404),
   │    RecipientNotFoundError (404), RewardOutOfStockError (409),
   │    RewardInactiveError (409), DuplicateRequestError (409/idempotent-return)
   ├─ InfrastructureError    -- system failures (not client's fault), often RETRYABLE
@@ -773,6 +789,52 @@ Only a single `infra` module calls the tool factories (`createDatabase(cfg)`,
 "choose the provider via config" happens in exactly one place, and every domain module stays
 infrastructure-agnostic.
 
+### The `user` module — JIT provisioning from `auth`
+
+`auth` (§11) is the infra *tool*: an `Authenticator.verify(token): Promise<Principal>` that
+authenticates a request and returns `{ subject, email, name? }` — `subject` is the IdP's
+stable id (OIDC `sub`), not a local uuid. `user` is the *domain module* that turns a verified
+`Principal` into a row in `users` (§3) the rest of the app can hang a `uuid` FK off of. Same
+split as every other tool: `auth` doesn't know what a "user" means to this app, `user` doesn't
+know what an IdP is.
+
+An `AuthGuard` (in `shared/`, wrapping the injected `Authenticator`) runs on protected routes.
+After verifying the token, it calls `UserOnboardingService.ensureUser(principal)`:
+
+```
+ensureUser(principal):
+  existing := users.findByExternalSubject(principal.subject)
+  if existing: return existing
+  BEGIN
+    user := users.create({ externalSubject: principal.subject, email, name })
+    INSERT outbox('user.created', { userId: user.id })
+  COMMIT
+  return user
+```
+
+Find-or-create by `external_subject` is naturally idempotent (`UNIQUE` constraint +
+`ON CONFLICT`), so concurrent first-requests from the same brand-new user race safely — same
+shape as every other idempotent insert in this system (P6). The guard attaches the resulting
+`user.id` (not `principal.subject`) to the request context; controllers and services only ever
+see the local uuid.
+
+**This is what finally wires up the `provision()` methods left orphaned everywhere else in
+this document.** `SenderBalanceRepository.provision()` and `ReceiverBalanceRepository.provision()`
+exist today but are deliberately uncalled — `sendKudo`/`syncFromLedger` throw
+`SenderNotProvisionedError`/`RecipientNotProvisionedError` instead of silently creating a row,
+specifically because provisioning is *this* module's job, not theirs. `point` gets its own
+`UserCreatedListener` reacting to `user.created` — same pattern as the two `KudoCreditedListener`
+classes in `point` and `feed` (§5) — that calls both `provision()` methods for the new
+`userId`. Cross-module, event-driven, no direct import of `user`'s repository from `point`.
+
+One consequence worth stating plainly: between a user's first authenticated request and
+`UserCreatedListener` finishing, there's a real (usually sub-second) window where that user
+is "known" (has a `users` row, can be a `recipient_id` in a request) but not yet provisioned.
+A kudo sent *to* them in that window would hit `RecipientNotProvisionedError` when the credit
+side tries to fold into `receiver_balance` — an edge case, not a bug, and no worse than any
+other eventually-consistent step in this design (§7's "displayed balance is eventually
+consistent" already accepts windows like this elsewhere).
+
 ---
 
 ## 13. Repository pattern & unit-of-work
@@ -819,7 +881,7 @@ The service writes the whole atomic core inside one `run`:
 
 ```ts
 await uow.run(async () => {
-  if (!await budget.reserve(senderId, period, points)) throw new InsufficientBudgetError();
+  if (!await budget.reserve(senderId, points)) throw new InsufficientBudgetError();
   await ledger.appendDebit({ userId: senderId, points, type: 'giving_spend' });
   const t = await transfers.create({ senderId, recipientId, points, status: 'pending' });
   await posts.create({ authorId: senderId, transferId: t.id, status: 'pending' });
@@ -835,8 +897,9 @@ non-atomic check-then-act, because the port doesn't expose one:
 
 ```ts
 interface BudgetRepository {
-  reserve(userId, period, points): Promise<boolean>;   // atomic conditional UPDATE; false if it would exceed cap
-  refund(userId, period, points): Promise<void>;       // compensation
+  provision(userId): Promise<void>;            // idempotent; seeds a fresh row with the full budget
+  reserve(userId, points): Promise<boolean>;   // atomic conditional UPDATE; false if it would exceed cap
+  refund(userId, points): Promise<void>;       // compensation
 }
 interface BalanceRepository {
   lockForUpdate(userId): Promise<Balance>;             // FOR UPDATE, for redemption
@@ -933,7 +996,8 @@ kudos-api/
 │   │   │   ├── notification/
 │   │   │   ├── realtime/
 │   │   │   ├── budget/
-│   │   │   └── auth/
+│   │   │   └── user/              # owns `users`; UserOnboardingService (JIT-provisions from
+│   │   │                          # the injected auth tool's Principal), emits user.created
 │   │   └── workers/               # DB-blind consumers; depend on module ports, not schemas/Database
 │   └── test/                      # end-to-end tests and their Jest config
 │
@@ -976,6 +1040,59 @@ Stated explicitly so each reads as a *choice*, not a gap:
 - **Repository interfaces are omitted until substitution is real.** Each table currently has
   one injected Kysely repository class. Add an interface token only when a second implementation
   or a true external port appears; do not duplicate signatures speculatively.
+- **`sender_balance` is a single remaining-balance row per user, refilled monthly — not a
+  period-keyed row per user per month.** The ledger already *is* the permanent history of what
+  was given and when (P1); `sender_balance` isn't there to preserve that, it exists only to give
+  the budget invariant a single row it can atomically, conditionally decrement
+  (`reserve()`'s `UPDATE ... WHERE remaining >= :points`). A cap check against a live
+  `SUM(ledger)` can't be gated atomically without inventing a lock anyway — at which point
+  you've rebuilt this row under a different name. A monthly cron (`BudgetResetWorker`) refills
+  every row to the full budget on the 1st. Provisioning a new user's row (`provision()`) is
+  deliberately *not* called from `sendKudo` — creating a budget row is a user-lifecycle
+  concern, not a send-a-kudo concern. There is no user module yet, so `provision()` is
+  currently unwired; until it's called from somewhere, `sendKudo` throws
+  `SenderNotProvisionedError` for a sender with no row rather than silently creating one.
+- **`receiver_balance`'s projection fold sums only new ledger rows since a checkpoint,
+  never the recipient's full history.** A blind `earned_points += points` is not idempotent —
+  at-least-once redelivery of `kudo.credited` would double-count. Recomputing the full
+  `SUM(delta) WHERE user_id = recipient AND ledger_type = 'earn'` on every fold would be
+  idempotent but not bounded — cost grows with how many kudos that recipient has *ever*
+  received, exactly the "`SUM` over history on a hot path" anti-pattern §8 warns about, except
+  here on the write path too. The fix is the same one §8 already uses for the reconciliation
+  cron, just applied to the live fold: `last_ledger_id` is a checkpoint, and each fold sums
+  only `point_ledger` rows with `id > last_ledger_id` — normally exactly one row. This is
+  *also* what makes it idempotent: a redelivered event's ledger row is already
+  `<= last_ledger_id`, so it sums zero new rows and no-ops, no separate dedupe/processed-events
+  table needed. The fold takes `FOR UPDATE` on the recipient's `receiver_balance` row before
+  reading the checkpoint, so concurrent folds for the same recipient (a burst of kudos
+  landing close together) serialize instead of both reading the same pre-fold checkpoint and
+  double-counting — the same failure mode §7 describes for a naive `receiver_balance` UPDATE
+  in the send path, here on the credit path instead.
+  Orchestration lives in `ReceiverBalanceService.syncFromLedger()` (lock →
+  sum-since-checkpoint → apply), not on the repositories — each repository method
+  (`ReceiverBalanceRepository.lockForUpdate/applyDelta`, `PointLedgerRepository.sumEarnedSince`)
+  does exactly one dedicated operation and makes no decisions; the service is what decides
+  "if nothing's new since the checkpoint, stop." This service is designed to be reused as-is
+  for redemption's own reconciliation step (§6: "reconcile against the ledger under this
+  lock") once redemption exists — it will just need `ledger_type` broadened from `'earn'`
+  alone to also include `'redeem_spend'`.
+  Same as `sender_balance` (above): `ReceiverBalanceRepository.provision()` exists but is
+  deliberately **not** called from `syncFromLedger()` — provisioning a recipient's balance
+  row is a user-lifecycle concern, not a credit-a-kudo concern, and there's no user module yet
+  to own it. If `lockForUpdate()` finds no row, `syncFromLedger()` throws
+  `RecipientNotProvisionedError` rather than silently creating one.
+- **Completing `point_transfer` waits on the `receiver_balance` fold, not just the ledger
+  credit.** `point`'s `KudoCreditedListener` (reacting to `kudo.credited`) runs
+  `ReceiverBalanceService.syncFromLedger()` then `pointTransfers.markCompleted()` in one
+  transaction —
+  "completed" means the recipient's balance is settled, not merely that the ledger has the
+  row. `feed` has its own, differently-behaved `KudoCreditedListener` reacting to the same
+  `kudo.credited` event independently to publish the post — feed visibility only depends on
+  the ledger being durable, not on the balance projection, so it isn't sequenced behind it.
+  Listener classes are named after the **topic** they subscribe to
+  (`KudoDebitedListener`, `KudoCreditedListener`), not the action they perform — each module
+  can have its own same-named listener for a topic it cares about, since the class lives in,
+  and is scoped to, that module.
 
 ### One-line summary
 

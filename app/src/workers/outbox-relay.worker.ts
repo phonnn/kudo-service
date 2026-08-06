@@ -21,14 +21,17 @@ export class OutboxRelayWorker
   ) {
     this.relay = new OutboxRelay(source, bus);
   }
+
   onApplicationBootstrap(): void {
     this.timer = setInterval(() => void this.flush(), 500);
     this.timer.unref();
   }
+
   async onApplicationShutdown(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     await this.bus.close();
   }
+
   private async flush(): Promise<void> {
     if (this.flushing) return;
     this.flushing = true;

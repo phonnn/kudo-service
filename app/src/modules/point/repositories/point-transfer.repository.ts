@@ -59,4 +59,15 @@ export class PointTransferRepository {
       })
       .execute();
   }
+
+  // only transitions from 'pending' — a redelivered kudo.debited is a safe no-op
+  async markCompleted(id: string): Promise<void> {
+    await this.database
+      .client<PointTransferDatabaseSchema>()
+      .updateTable('point_transfer')
+      .set({ status: 'completed' })
+      .where('id', '=', id)
+      .where('status', '=', 'pending')
+      .execute();
+  }
 }

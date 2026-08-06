@@ -32,6 +32,7 @@
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/schedule": "^6.1.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "reflect-metadata": "^0.2.2",
@@ -73,6 +74,10 @@
     ],
     "rootDir": "app/src",
     "testRegex": ".*\\.spec\\.ts$",
+    "moduleNameMapper": {
+      "^@kudo/database$": "<rootDir>/../../libs/database/src",
+      "^@kudo/messaging$": "<rootDir>/../../libs/messaging/src"
+    },
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },

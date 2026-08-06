@@ -32,6 +32,7 @@ export class OutboxRepository implements OutboxSource {
         payload: message.payload,
         published_at: null,
       })
+      .onConflict((conflict) => conflict.column('id').doNothing())
       .execute();
   }
 
