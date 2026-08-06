@@ -11,6 +11,7 @@ export interface ReceiverBalanceDatabaseSchema {
 }
 
 export interface ReceiverBalanceCheckpoint {
+  earnedPoints: number;
   lastLedgerId: number;
 }
 
@@ -39,20 +40,27 @@ export class ReceiverBalanceRepository {
     const row = await this.database
       .client<ReceiverBalanceDatabaseSchema>()
       .selectFrom('receiver_balance')
-      .select('last_ledger_id')
+      .select(['earned_points', 'last_ledger_id'])
       .where('user_id', '=', userId)
       .forUpdate()
       .executeTakeFirst();
 
-    return row ? { lastLedgerId: Number(row.last_ledger_id) } : null;
+    return row
+      ? {
+          earnedPoints: Number(row.earned_points),
+          lastLedgerId: Number(row.last_ledger_id),
+        }
+      : null;
   }
 
+  // returns the resulting earned_points so callers (e.g. redemption) can act
+  // on the authoritative post-write balance without a second round trip.
   async applyDelta(
     userId: string,
     points: number,
     lastLedgerId: number,
-  ): Promise<void> {
-    await this.database
+  ): Promise<number> {
+    const row = await this.database
       .client<ReceiverBalanceDatabaseSchema>()
       .updateTable('receiver_balance')
       .set((eb) => ({
@@ -60,6 +68,9 @@ export class ReceiverBalanceRepository {
         last_ledger_id: lastLedgerId,
       }))
       .where('user_id', '=', userId)
-      .execute();
+      .returning('earned_points')
+      .executeTakeFirstOrThrow();
+
+    return Number(row.earned_points);
   }
 }

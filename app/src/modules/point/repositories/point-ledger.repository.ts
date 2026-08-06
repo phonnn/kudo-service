@@ -14,7 +14,13 @@ export interface EarnCreditRecord {
   transferId: string;
 }
 
-export interface EarnedSince {
+export interface RedeemDebitRecord {
+  userId: string;
+  points: number;
+  redemptionId: string;
+}
+
+export interface BalanceChangesSince {
   total: number;
   maxId: number | null;
 }
@@ -69,7 +75,35 @@ export class PointLedgerRepository {
       .execute();
   }
 
-  async sumEarnedSince(userId: string, sinceId: number): Promise<EarnedSince> {
+  // one debit row per redemption — the redemption row's own UNIQUE
+  // idempotency_key (checked before this is ever called) is what prevents a
+  // double-spend, not this insert. Returns the new row's id so the caller
+  // can advance receiver_balance's checkpoint to include it.
+  async appendRedeemDebit(record: RedeemDebitRecord): Promise<number> {
+    const row = await this.database
+      .client<PointLedgerDatabaseSchema>()
+      .insertInto('point_ledger')
+      .values({
+        user_id: record.userId,
+        delta: -record.points,
+        ledger_type: 'redeem_spend',
+        ref_type: 'redemption',
+        ref_id: record.redemptionId,
+        idempotency_key: `redemption:${record.redemptionId}:debit`,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+
+    return Number(row.id);
+  }
+
+  // covers both directions that affect a user's earned balance (B): 'earn'
+  // credits and 'redeem_spend' debits. delta is already signed, so a plain
+  // sum is correct for either.
+  async sumBalanceChangesSince(
+    userId: string,
+    sinceId: number,
+  ): Promise<BalanceChangesSince> {
     const { total, maxId } = await this.database
       .client<PointLedgerDatabaseSchema>()
       .selectFrom('point_ledger')
@@ -78,7 +112,7 @@ export class PointLedgerRepository {
         eb.fn.max('id').as('maxId'),
       ])
       .where('user_id', '=', userId)
-      .where('ledger_type', '=', 'earn')
+      .where('ledger_type', 'in', ['earn', 'redeem_spend'])
       .where('id', '>', sinceId)
       .executeTakeFirstOrThrow();
 

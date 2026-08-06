@@ -590,8 +590,9 @@ AppError (base)  { code, message, httpStatus, retryable, context, cause? }
   │    InsufficientBudgetError (409), InsufficientBalanceError (409),
   │    SelfRecognitionError (422), InvalidPointsError (422),
   │    SenderNotProvisionedError (404), RecipientNotProvisionedError (404),
-  │    RecipientNotFoundError (404), RewardOutOfStockError (409),
-  │    RewardInactiveError (409), DuplicateRequestError (409/idempotent-return)
+  │    RecipientNotFoundError (404), RewardNotFoundError (404),
+  │    RewardOutOfStockError (409), RewardInactiveError (409),
+  │    DuplicateRequestError (409/idempotent-return)
   ├─ InfrastructureError    -- system failures (not client's fault), often RETRYABLE
   │    DatabaseUnavailableError (503), LockTimeoutError (503/409),
   │    BrokerUnavailableError (503), MediaProcessingError (async, non-fatal)
@@ -1070,12 +1071,13 @@ Stated explicitly so each reads as a *choice*, not a gap:
   in the send path, here on the credit path instead.
   Orchestration lives in `ReceiverBalanceService.syncFromLedger()` (lock →
   sum-since-checkpoint → apply), not on the repositories — each repository method
-  (`ReceiverBalanceRepository.lockForUpdate/applyDelta`, `PointLedgerRepository.sumEarnedSince`)
-  does exactly one dedicated operation and makes no decisions; the service is what decides
-  "if nothing's new since the checkpoint, stop." This service is designed to be reused as-is
-  for redemption's own reconciliation step (§6: "reconcile against the ledger under this
-  lock") once redemption exists — it will just need `ledger_type` broadened from `'earn'`
-  alone to also include `'redeem_spend'`.
+  (`ReceiverBalanceRepository.lockForUpdate/applyDelta`,
+  `PointLedgerRepository.sumBalanceChangesSince`) does exactly one dedicated operation and
+  makes no decisions; the service is what decides "if nothing's new since the checkpoint,
+  stop." `syncFromLedger()` returns the authoritative post-fold `earned_points`, and
+  `sumBalanceChangesSince` sums both `'earn'` credits and `'redeem_spend'` debits (not `'earn'`
+  alone) — both exist specifically so redemption (§6) can reuse this service as-is for its own
+  "reconcile against the ledger under this lock" step, rather than duplicating the fold logic.
   Same as `sender_balance` (above): `ReceiverBalanceRepository.provision()` exists but is
   deliberately **not** called from `syncFromLedger()` — provisioning a recipient's balance
   row is a user-lifecycle concern, not a credit-a-kudo concern, and there's no user module yet
@@ -1093,6 +1095,21 @@ Stated explicitly so each reads as a *choice*, not a gap:
   (`KudoDebitedListener`, `KudoCreditedListener`), not the action they perform — each module
   can have its own same-named listener for a topic it cares about, since the class lives in,
   and is scoped to, that module.
+- **Redemption reuses `ReceiverBalanceService.syncFromLedger()` for its reconciliation step,
+  exactly as predicted above — no separate lock, no separate fold logic.**
+  `RedeemRewardService.redeemReward()` calls it inside its own `unitOfWork.run()`; since
+  `syncFromLedger` already took `FOR UPDATE` on the user's `receiver_balance` row and returns
+  the authoritative `earned_points`, the redeem transaction never needs a second lock
+  acquisition — it's the same row, same transaction, same lock, held continuously from the
+  reconcile through the eventual `applyDelta(-cost)`. `PointLedgerRepository.appendRedeemDebit`
+  returns the new ledger row's id so that final `applyDelta` call can advance the checkpoint
+  too, exactly like the credit path — a redemption's own debit is never re-summed by a later
+  fold. Order matches §6's pseudocode precisely: idempotency check → reward exists/active →
+  balance reconciled and checked → stock reserved (only if finite) → redemption + ledger +
+  balance written together. `reward` module reaches directly into `point`'s repositories/
+  service for this (not via events) — the same reasoning as `sendKudo` creating `feed_post`
+  inline (§12): this is one atomic transaction protecting one invariant, not async fan-out, so
+  it doesn't belong on the event bus.
 
 ### One-line summary
 
