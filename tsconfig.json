@@ -16,7 +16,8 @@
     "baseUrl": "./",
     "paths": {
       "@kudo/database": ["libs/database/src"],
-      "@kudo/messaging": ["libs/messaging/src"]
+      "@kudo/messaging": ["libs/messaging/src"],
+      "@kudo/storage": ["libs/storage/src"]
     },
     "incremental": true,
     "skipLibCheck": true,
