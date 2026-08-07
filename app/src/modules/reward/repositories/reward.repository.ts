@@ -12,16 +12,20 @@ export interface RewardRecord {
 export interface RewardListItem {
   id: string;
   name: string;
+  description: string;
   costPoints: number;
   stock: number | null;
+  imageUrl: string | null;
 }
 
 export interface RewardDatabaseSchema {
   reward: {
     id: string;
     name: string;
+    description: string;
     cost_points: number;
     stock: number | null;
+    image_url: string | null;
     active: boolean;
     created_at: Generated<Date>;
   };
@@ -57,7 +61,14 @@ export class RewardRepository {
     const rows = await this.database
       .client<RewardDatabaseSchema>()
       .selectFrom('reward')
-      .select(['id', 'name', 'cost_points', 'stock'])
+      .select([
+        'id',
+        'name',
+        'description',
+        'cost_points',
+        'stock',
+        'image_url',
+      ])
       .where('active', '=', true)
       .orderBy('name')
       .execute();
@@ -65,8 +76,10 @@ export class RewardRepository {
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
+      description: row.description,
       costPoints: row.cost_points,
       stock: row.stock,
+      imageUrl: row.image_url,
     }));
   }
 }
