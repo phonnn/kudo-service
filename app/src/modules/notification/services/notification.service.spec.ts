@@ -13,6 +13,7 @@ describe('NotificationService', () => {
       const created = {
         id: 'notif-1',
         type: NotificationType.COMMENT,
+        senderName: 'Ada',
         payload: { postId: 'post-1' },
         readAt: null,
         createdAt: new Date(),
@@ -54,6 +55,7 @@ describe('NotificationService', () => {
         {
           id: 'notif-1',
           type: NotificationType.COMMENT,
+          senderName: 'Ada',
           payload: {},
           readAt: null,
           createdAt: new Date(),
@@ -77,6 +79,7 @@ describe('NotificationService', () => {
         {
           id: 'notif-1',
           type: NotificationType.COMMENT,
+          senderName: 'Ada',
           payload: {},
           readAt: null,
           createdAt,

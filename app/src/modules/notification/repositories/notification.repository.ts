@@ -6,6 +6,7 @@ import type { NotificationType } from '../dto/notification-type.enum';
 export interface NotificationRecord {
   id: string;
   type: NotificationType;
+  senderName: string | null;
   payload: Record<string, unknown>;
   readAt: Date | null;
   createdAt: Date;
@@ -130,6 +131,10 @@ function toRecord(row: {
   return {
     id: row.id,
     type: row.type,
+    senderName:
+      typeof row.payload.senderName === 'string'
+        ? row.payload.senderName
+        : null,
     payload: row.payload,
     readAt: row.read_at,
     createdAt: row.created_at,
