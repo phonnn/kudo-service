@@ -1,32 +1,49 @@
 # kudo-service
 
-A NestJS API service.
+A peer-recognition/rewards platform API (NestJS + Kysely/Postgres + Redis Streams), built as a Yarn Berry workspace (`app/` + `libs/*`).
 
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) 22+
-- [Yarn](https://yarnpkg.com/) (classic, v1)
+- [Corepack](https://nodejs.org/api/corepack.html) (ships with Node 16.10+) — this project uses **Yarn Berry**, not classic Yarn. Run `corepack enable` once per machine so `yarn` resolves to the right version automatically.
+- [Docker](https://www.docker.com/) — for the local Postgres/Redis/MinIO stack.
 
 ## Install
 
 ```bash
+corepack enable
 yarn install
+```
+
+## Environment
+
+```bash
+cp .env.example .env
+```
+
+Defaults in `.env.example` line up with the backing services below, so nothing else needs to change for local dev.
+
+## Start backing services
+
+```bash
+docker compose up -d
+```
+
+Starts Postgres, Redis, and MinIO (see `docker-compose.yml`). Add `--profile tools` to also start pgAdmin/RedisInsight.
+
+## Run database migrations
+
+```bash
+yarn migrate:latest
 ```
 
 ## Run locally
 
 ```bash
-# watch mode (recommended for local dev)
 yarn start:dev
-
-# without file watching
-yarn start
-
-# production mode (requires `yarn build` first)
-yarn start:prod
 ```
 
-The server listens on `http://localhost:3000` by default (override with the `PORT` env var).
+Server listens on `http://localhost:3000` by default (`PORT` env var to override).
 
 ## Test
 
@@ -40,7 +57,7 @@ yarn test:watch
 # unit test coverage
 yarn test:cov
 
-# end-to-end tests
+# end-to-end tests (needs the backing services running + migrations applied)
 yarn test:e2e
 ```
 
@@ -55,15 +72,6 @@ yarn format  # prettier --write
 
 ```bash
 yarn build   # compiles to dist/
-```
-
-## Docker
-
-Build and run the production image locally:
-
-```bash
-docker build -t kudo-service .
-docker run -p 3000:3000 kudo-service
 ```
 
 ## CI
