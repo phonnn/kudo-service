@@ -25,6 +25,8 @@ COPY libs/security/package.json ./libs/security/package.json
 COPY libs/storage/package.json ./libs/storage/package.json
 RUN yarn install --frozen-lockfile --production && yarn cache clean
 COPY --from=build /app/dist ./dist
+COPY kysely.config.ts ./
+COPY app/src/migrations ./app/src/migrations
 
 EXPOSE 3000
-CMD ["node", "dist/main.js"]
+CMD ["sh", "-c", "yarn migrate:latest && node dist/app/src/main.js"]
