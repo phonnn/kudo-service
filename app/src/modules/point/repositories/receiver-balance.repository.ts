@@ -53,6 +53,21 @@ export class ReceiverBalanceRepository {
       : null;
   }
 
+  // Plain, unlocked read for display (§7/§8: "display is cheap and
+  // eventual; spending is exact and pays the lock cost only on the rare
+  // write" — this is the cheap side). Never the right call at spend time;
+  // use lockForUpdate() there. Returns null if the user has no row yet.
+  async getEarnedPoints(userId: string): Promise<number | null> {
+    const row = await this.database
+      .client<ReceiverBalanceDatabaseSchema>()
+      .selectFrom('receiver_balance')
+      .select('earned_points')
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+
+    return row ? Number(row.earned_points) : null;
+  }
+
   // returns the resulting earned_points so callers (e.g. redemption) can act
   // on the authoritative post-write balance without a second round trip.
   async applyDelta(
