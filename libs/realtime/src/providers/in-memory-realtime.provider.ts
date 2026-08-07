@@ -27,4 +27,9 @@ export class InMemoryRealtimePush implements RealtimePush {
       map((entry) => entry.event),
     );
   }
+
+  close(): Promise<void> {
+    this.subject.complete();
+    return Promise.resolve();
+  }
 }

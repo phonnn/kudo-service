@@ -72,4 +72,12 @@ export class RedisRealtimePush implements RealtimePush {
     ]).then(() => undefined);
     await this.connectPromise;
   }
+
+  async close(): Promise<void> {
+    await Promise.all(
+      [this.publisher, this.subscriber].map((client) =>
+        client.isOpen ? client.disconnect() : Promise.resolve(),
+      ),
+    );
+  }
 }

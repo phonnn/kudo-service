@@ -10,4 +10,5 @@ export interface RealtimeEvent {
 export interface RealtimePush {
   publish(room: string, event: RealtimeEvent): void;
   stream(room: string): Observable<RealtimeEvent>;
+  close(): Promise<void>;
 }

@@ -9,6 +9,7 @@ import type { MessagingConfig } from '../messaging.config';
 
 export class RedisEventBus implements EventBus {
   private readonly client: RedisClientType;
+  private readonly consumerClients: RedisClientType[] = [];
   private readonly stream: string;
   private connectPromise?: Promise<void>;
   private closed = false;
@@ -31,6 +32,8 @@ export class RedisEventBus implements EventBus {
     });
   }
 
+  // Each consumer gets its own connection — xReadGroup blocks it for up to
+  // BLOCK ms, so sharing one would serialize every consumer behind it.
   async subscribe(
     topic: string,
     groupName: string,
@@ -39,12 +42,26 @@ export class RedisEventBus implements EventBus {
     await this.connect();
     await this.ensureGroup(groupName);
     const consumerName = `${groupName}-${randomUUID()}`;
-    void this.consume(topic, groupName, consumerName, handler);
+
+    const consumerClient: RedisClientType = this.client.duplicate();
+    consumerClient.on('error', (error) =>
+      console.error('Redis event bus error', error),
+    );
+    await consumerClient.connect();
+    this.consumerClients.push(consumerClient);
+
+    void this.consume(consumerClient, topic, groupName, consumerName, handler);
   }
 
+  // disconnect(), not quit() — quit() would wait out each connection's
+  // in-flight blocking xReadGroup first.
   async close(): Promise<void> {
     this.closed = true;
-    if (this.client.isOpen) await this.client.quit();
+    await Promise.all(
+      [this.client, ...this.consumerClients].map((client) =>
+        client.isOpen ? client.disconnect() : Promise.resolve(),
+      ),
+    );
   }
 
   private async connect(): Promise<void> {
@@ -66,13 +83,14 @@ export class RedisEventBus implements EventBus {
   }
 
   private async consume(
+    client: RedisClientType,
     topic: string,
     groupName: string,
     consumerName: string,
     handler: EventHandler,
   ): Promise<void> {
     while (!this.closed) {
-      const response = await this.client
+      const response = await client
         .xReadGroup(
           groupName,
           consumerName,
@@ -80,6 +98,7 @@ export class RedisEventBus implements EventBus {
           { COUNT: 10, BLOCK: 5000 },
         )
         .catch((error: unknown) => {
+          if (this.closed) return null;
           console.error(`Consumer group ${groupName} read failed`, error);
           return null;
         });
@@ -87,13 +106,21 @@ export class RedisEventBus implements EventBus {
 
       for (const { messages } of response) {
         for (const { id, message } of messages) {
-          await this.handleMessage(topic, groupName, id, message, handler);
+          await this.handleMessage(
+            client,
+            topic,
+            groupName,
+            id,
+            message,
+            handler,
+          );
         }
       }
     }
   }
 
   private async handleMessage(
+    client: RedisClientType,
     topic: string,
     groupName: string,
     messageId: string,
@@ -101,7 +128,7 @@ export class RedisEventBus implements EventBus {
     handler: EventHandler,
   ): Promise<void> {
     if (fields.type !== topic) {
-      await this.client.xAck(this.stream, groupName, messageId);
+      await client.xAck(this.stream, groupName, messageId);
       return;
     }
     try {
@@ -111,7 +138,7 @@ export class RedisEventBus implements EventBus {
         occurredAt: fields.occurredAt,
         payload: JSON.parse(fields.payload) as Record<string, unknown>,
       });
-      await this.client.xAck(this.stream, groupName, messageId);
+      await client.xAck(this.stream, groupName, messageId);
     } catch (error) {
       console.error(
         `Handler for topic ${topic} (group ${groupName}) failed`,
