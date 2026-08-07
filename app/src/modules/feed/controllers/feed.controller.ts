@@ -2,30 +2,54 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
   Headers,
   Post,
+  Query,
+  UseGuards,
 } from '@nestjs/common';
+import { AuthGuard, CurrentPrincipal, type Principal } from '@kudo/security';
 import { FeedPostService } from '../services/feed-post.service';
+import {
+  FeedQueryService,
+  type FeedPage,
+} from '../services/feed-query.service';
 import { SendKudoDto } from '../dto/send-kudo.dto';
+import { ListFeedQueryDto } from '../dto/list-feed-query.dto';
 
 @Controller('kudos')
 export class FeedController {
-  constructor(private readonly feedPosts: FeedPostService) {}
+  constructor(
+    private readonly feedPosts: FeedPostService,
+    private readonly feedQuery: FeedQueryService,
+  ) {}
 
+  @UseGuards(AuthGuard)
   @Post()
   send(
     @Body() dto: SendKudoDto,
-    @Headers('x-user-id') senderId?: string,
+    @CurrentPrincipal() principal: Principal,
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    if (!senderId)
-      throw new BadRequestException('x-user-id header is required');
     if (!idempotencyKey)
       throw new BadRequestException('idempotency-key header is required');
     return this.feedPosts.sendKudo({
-      senderId,
+      senderId: principal.subject,
       idempotencyKey,
       ...dto,
     });
+  }
+
+  @UseGuards(AuthGuard)
+  @Get()
+  list(
+    @Query() query: ListFeedQueryDto,
+    @CurrentPrincipal() principal: Principal,
+  ): Promise<FeedPage> {
+    return this.feedQuery.listFeed(
+      principal.subject,
+      query.limit,
+      query.cursor,
+    );
   }
 }

@@ -6,17 +6,34 @@ import { KudoCreditedListener } from './listeners/kudo-credited.listener';
 import { KudoReservationFailedListener } from './listeners/kudo-reservation-failed.listener';
 import { FeedController } from './controllers/feed.controller';
 import { MediaController } from './controllers/media.controller';
+import { CommentController } from './controllers/comment.controller';
+import { ReactionController } from './controllers/reaction.controller';
+import { CommentRepository } from './repositories/comment.repository';
 import { FeedMediaRepository } from './repositories/feed-media.repository';
 import { FeedPostRepository } from './repositories/feed-post.repository';
+import { ReactionRepository } from './repositories/reaction.repository';
+import { CommentService } from './services/comment.service';
 import { FeedPostService } from './services/feed-post.service';
+import { FeedQueryService } from './services/feed-query.service';
+import { ReactionService } from './services/reaction.service';
 
 @Module({
   imports: [InfraModule, OutboxModule, PointModule],
-  controllers: [FeedController, MediaController],
+  controllers: [
+    FeedController,
+    MediaController,
+    CommentController,
+    ReactionController,
+  ],
   providers: [
     FeedPostRepository,
     FeedMediaRepository,
+    CommentRepository,
+    ReactionRepository,
     FeedPostService,
+    FeedQueryService,
+    CommentService,
+    ReactionService,
     KudoCreditedListener,
     KudoReservationFailedListener,
   ],
