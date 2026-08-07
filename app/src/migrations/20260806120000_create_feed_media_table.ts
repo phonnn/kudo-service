@@ -1,10 +1,9 @@
 import { sql, type Kysely } from 'kysely';
 
-// feed_media — media belongs to the POST, not the transfer (ARCHITECTURE.md
-// §3). `kind` is constrained to 'image' only: video support (and the async
-// validate/transcode job in §4 Phase 2) is deliberately out of scope for now
-// — see §16. `status` keeps all three values anyway since they're a property
-// of the data model, not of which kind is currently implemented; image rows
+// `kind` is constrained to 'image' only: video support is deliberately out
+// of scope for now. `status` keeps all three values anyway since they're a
+// property of the data model, not of which kind is currently implemented;
+// image rows
 // are written straight to 'ready' (no async step needed), so 'pending' and
 // 'rejected' simply go unused until video ships. `duration_ms` is likewise
 // kept, unused, for the same reason — both are cheap to keep, unlike `kind`,

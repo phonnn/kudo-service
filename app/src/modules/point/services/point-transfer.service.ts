@@ -26,13 +26,6 @@ export class PointTransferService {
     private readonly outbox: OutboxRepository,
   ) {}
 
-  // The one synchronous, fail-fast call `feed`'s FeedPostService.sendKudo()
-  // makes into `point` (§4 Phase 1). This is a quick, unlocked READ — not the
-  // authoritative gate. The real atomic reserve happens later, in
-  // reserveKudoPoints() (Phase 1.5), in the same transaction as the ledger
-  // debit, so "balance moves with the ledger" stays true. This pre-check
-  // exists purely so an obviously-doomed request fails fast with an honest
-  // error instead of paying for a round trip through the event chain first.
   async reserveBudget(senderId: string, points: number): Promise<void> {
     const remaining = await this.senderBalances.getRemaining(senderId);
     if (remaining === null) {
@@ -43,16 +36,8 @@ export class PointTransferService {
     }
   }
 
-  // Phase 1.5 (§4): reacts to kudo.reserved. The idempotency check comes
-  // first so a redelivery after this already fully succeeded can't
-  // double-reserve — reserve() itself has no idea about idempotency keys,
-  // only findByIdempotencyKey does. If the atomic reserve then fails, that
-  // means Phase 1's pre-check went stale (a real race, not a request-time
-  // error the sender saw synchronously) — this gives up on this specific
-  // kudo rather than retrying indefinitely, since a stale budget check
-  // rarely un-stales itself. feed's own listener reacts to
-  // kudo.reservation-failed by marking its post 'failed'; point never
-  // touches feed_post directly (§12).
+  // The idempotency check must run first — reserve() itself has no idea
+  // about idempotency keys, only findByIdempotencyKey does.
   reserveKudoPoints(payload: KudoReservedPayload): Promise<void> {
     return this.unitOfWork.run(async () => {
       const existing = await this.pointTransfers.findByIdempotencyKey(
@@ -114,11 +99,6 @@ export class PointTransferService {
     });
   }
 
-  // saga tail for kudo.debited (§5) — ledger is authoritative on arrival,
-  // written first and idempotent, safe under at-least-once redelivery.
-  // Completing the transfer and publishing the post are separate concerns,
-  // each owned by their module, reacting to kudo.credited independently
-  // (see point/listeners and feed/listeners).
   creditKudo(payload: KudoDebitedPayload): Promise<void> {
     return this.unitOfWork.run(async () => {
       await this.pointLedger.appendEarnCredit({
@@ -133,8 +113,7 @@ export class PointTransferService {
         recipientId: payload.recipientId,
         points: payload.points,
       };
-      // deterministic id: dedupes the enqueue itself across at-least-once
-      // redelivery of kudo.debited, on top of the idempotent ledger/status writes above
+      // Deterministic id dedupes the enqueue across at-least-once redelivery.
       await this.outbox.enqueue({
         id: `kudo:${payload.transferId}:credited`,
         topic: KUDO_CREDITED,

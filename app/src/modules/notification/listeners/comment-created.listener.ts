@@ -25,7 +25,6 @@ export class CommentCreatedListener implements OnApplicationBootstrap {
 
   private handle(event: DomainEvent<CommentCreatedPayload>): Promise<void> {
     const { postAuthorId, authorId, postId, commentId } = event.payload;
-    // don't notify someone about commenting on their own post
     if (postAuthorId === authorId) return Promise.resolve();
 
     return this.notifications.notify({

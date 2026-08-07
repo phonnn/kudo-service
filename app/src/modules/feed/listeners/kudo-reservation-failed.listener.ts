@@ -9,10 +9,8 @@ import { FeedPostRepository } from '../repositories/feed-post.repository';
 
 const CONSUMER_GROUP = 'feed-post-reservation-failed-consumer';
 
-// the give-up path §16 anticipated for FeedPostRepository.markFailedByTransferId
-// — Phase 1.5's atomic reserve lost a race Phase 1's pre-check didn't catch
-// (see PointTransferService.reserveKudoPoints). point never touches
-// feed_post directly (§12), hence the event instead of a direct call.
+// `point` never touches feed_post directly, hence this reacts to an event
+// instead of a direct call.
 @Injectable()
 export class KudoReservationFailedListener implements OnApplicationBootstrap {
   constructor(

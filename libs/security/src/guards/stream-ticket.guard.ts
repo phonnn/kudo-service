@@ -7,11 +7,9 @@ import {
 import type { AuthenticatedRequest } from '../interfaces/authenticated-request.interface';
 import { StreamTicketStore } from '../stores/stream-ticket.store';
 
-// The counterpart to AuthGuard for streaming transports (SSE today,
-// WebSocket if @kudo/realtime ever ships that provider) whose browser API
-// can't set an Authorization header — reads `?ticket=` instead. Never
-// accepts a raw bearer token from the URL; only a ticket minted by
-// StreamTicketStore.issue() (see its file for why).
+// Reads `?ticket=` instead of an Authorization header. Never accepts a raw
+// bearer token from the URL — only a ticket minted by
+// StreamTicketStore.issue().
 @Injectable()
 export class StreamTicketGuard implements CanActivate {
   constructor(private readonly tickets: StreamTicketStore) {}

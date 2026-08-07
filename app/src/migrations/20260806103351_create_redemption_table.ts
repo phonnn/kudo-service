@@ -1,7 +1,7 @@
 import { sql, type Kysely } from 'kysely';
 
-// redemption — see redemption.repository.ts. idempotency_key is the
-// rapid-double-click guard; cost_points is a snapshot (the catalog may reprice later)
+// idempotency_key is the rapid-double-click guard; cost_points is a snapshot
+// (the catalog may reprice later)
 export async function up(db: Kysely<any>): Promise<void> {
   await db.schema
     .createTable('redemption')

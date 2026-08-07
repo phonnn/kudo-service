@@ -1,12 +1,11 @@
 import { sql, type Kysely } from 'kysely';
 
-// feed_post is now created before point_transfer exists (§4 — post is the
-// primary object, the transfer is attached to it), so its own idempotency
-// check can no longer key off point_transfer_id. idempotency_key gives it
-// the same guard point_transfer/point_ledger/redemption already have.
-// 'failed' is added to status for the (rare, infra-only) case where the
-// deferred point-transfer bookkeeping never completes — see
-// KudoReservedListener.
+// feed_post's own idempotency check can no longer key off point_transfer_id
+// now that feed_post is created before point_transfer exists.
+// idempotency_key gives it the same guard point_transfer/point_ledger/
+// redemption already have. 'failed' is added to status for the (rare,
+// infra-only) case where the deferred point-transfer bookkeeping never
+// completes.
 export async function up(db: Kysely<any>): Promise<void> {
   await db.schema
     .alterTable('feed_post')

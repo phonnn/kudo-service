@@ -12,8 +12,8 @@ import {
 } from 'class-validator';
 import { Tag } from './tag.enum';
 
-// the object_key/domain a POST /media/presign upload already resolved to
-// (§4 Phase 0) — never a fresh upload, so no contentType/kind here.
+// objectKey/domain from an already-completed presigned upload — no
+// contentType/kind here, since nothing is uploaded through this endpoint.
 export class SendKudoMediaDto {
   @IsString() @Length(1, 500) objectKey!: string;
   @IsString() @Length(1, 500) domain!: string;

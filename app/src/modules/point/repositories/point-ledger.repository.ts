@@ -58,7 +58,7 @@ export class PointLedgerRepository {
       .execute();
   }
 
-  // idempotent on (transferId,'earn') — safe for at-least-once redelivery of kudo.debited
+  // Idempotent on (transferId, 'earn') — safe under at-least-once redelivery.
   async appendEarnCredit(record: EarnCreditRecord): Promise<void> {
     await this.database
       .client<PointLedgerDatabaseSchema>()
@@ -75,10 +75,8 @@ export class PointLedgerRepository {
       .execute();
   }
 
-  // one debit row per redemption — the redemption row's own UNIQUE
-  // idempotency_key (checked before this is ever called) is what prevents a
-  // double-spend, not this insert. Returns the new row's id so the caller
-  // can advance receiver_balance's checkpoint to include it.
+  // Does not itself guard against double-spend — that's enforced by the
+  // redemption row's own unique idempotency key, checked before this is called.
   async appendRedeemDebit(record: RedeemDebitRecord): Promise<number> {
     const row = await this.database
       .client<PointLedgerDatabaseSchema>()
@@ -97,9 +95,8 @@ export class PointLedgerRepository {
     return Number(row.id);
   }
 
-  // covers both directions that affect a user's earned balance (B): 'earn'
-  // credits and 'redeem_spend' debits. delta is already signed, so a plain
-  // sum is correct for either.
+  // Covers both directions affecting earned balance: 'earn' credits and
+  // 'redeem_spend' debits. delta is already signed, so a plain sum is correct.
   async sumBalanceChangesSince(
     userId: string,
     sinceId: number,

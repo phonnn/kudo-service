@@ -31,8 +31,8 @@ export interface FeedMediaDatabaseSchema {
 export class FeedMediaRepository {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
-  // images need no async validation/transcode step (§16), so this writes
-  // straight to 'ready' — there is no pending→ready transition to wait on.
+  // Images need no async validate/transcode step, so this writes straight
+  // to 'ready'.
   async create(record: CreateFeedMedia): Promise<void> {
     await this.database
       .client<FeedMediaDatabaseSchema>()
@@ -49,14 +49,9 @@ export class FeedMediaRepository {
       .execute();
   }
 
-  // Batched, not a LEFT JOIN in FeedPostRepository.listPublished — a post
-  // could in principle have more than one row (no unique constraint on
-  // post_id; only convention keeps it to one image today), and joining
-  // would silently duplicate the post row if that ever happened. Same
-  // pattern as ReactionRepository.findTypesByPostIdsAndUser: fetch the
-  // page of posts first, then ask once for "which of these have media."
-  // Takes the first row per post if duplicates ever exist, ready-only —
-  // a pending/rejected image (video, once that ships) shouldn't render.
+  // No unique constraint on post_id (convention keeps it to one image
+  // today) — takes the first row per post if duplicates ever exist, and
+  // only 'ready' media, since pending/rejected shouldn't render.
   async findByPostIds(postIds: string[]): Promise<Map<string, FeedMediaItem>> {
     if (postIds.length === 0) return new Map();
 

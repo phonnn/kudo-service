@@ -1,7 +1,5 @@
 import type { Kysely } from 'kysely';
 
-// receiver_balance (B) — earned/usable projection, one row per user.
-// Folded from point_ledger incrementally (see receiver-balance.repository.ts):
 // last_ledger_id is a checkpoint so each fold only sums rows newer than the
 // last one applied — bounded cost per fold, and naturally idempotent under
 // at-least-once redelivery of kudo.credited (a redelivered event sums zero

@@ -10,10 +10,8 @@ import type { AuthenticatedRequest } from '../interfaces/authenticated-request.i
 import { AUTH_PROVIDER } from '../tokens';
 import { extractBearerToken } from './extract-bearer-token';
 
-// Mandatory login: blocks the request unless a bearer token verifies
-// against whichever AuthProvider is bound to AUTH_PROVIDER. The guard
-// itself is provider-agnostic — swapping local for Cognito is a config
-// change, not a guard change.
+// Provider-agnostic — swapping local for Cognito is a config change, not a
+// guard change.
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(

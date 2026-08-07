@@ -54,8 +54,6 @@ export interface FeedPostDatabaseSchema {
     comment_count: Generated<number>;
     reaction_count: Generated<number>;
   };
-  // joined only by listPublished() below — feed_post's own writes never
-  // touch point_transfer/user, this is the one read that needs all three.
   point_transfer: {
     id: string;
     recipient_id: string;
@@ -71,11 +69,9 @@ export interface FeedPostDatabaseSchema {
 export class FeedPostRepository {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
-  // the primary idempotency guard for sendKudo now — the post is created
-  // before point_transfer exists, so this can no longer key off
-  // point_transfer_id (§4). point_transfer_id is only nullable for future
-  // non-kudo post types (§3); every row this method can find has one, since
-  // create() always sets it.
+  // point_transfer_id is nullable in the schema (for future non-kudo post
+  // types), but every row this method finds has one, since create() always
+  // sets it — hence the cast below.
   async findByIdempotencyKey(key: string): Promise<FeedPostRecord | null> {
     const row = await this.database
       .client<FeedPostDatabaseSchema>()
@@ -111,12 +107,6 @@ export class FeedPostRepository {
       .execute();
   }
 
-  // gate for comment/reaction writes: a post that doesn't exist, isn't
-  // published yet, or was soft-deleted isn't something you can interact
-  // with — mirrors "feed visible ⟺ money settled" (§4): if it's not
-  // visible in the feed, it's not commentable/reactable either. Returns
-  // authorId too — CommentService/ReactionService need it to know who to
-  // notify (and to skip notifying someone about their own post).
   async findPublishedById(
     id: string,
   ): Promise<{ id: string; authorId: string } | null> {
@@ -132,8 +122,6 @@ export class FeedPostRepository {
     return row ?? null;
   }
 
-  // Returns the post-increment count (not void) so callers can push it
-  // straight into a realtime "post.updated" event without a second read.
   async incrementCommentCount(postId: string): Promise<number> {
     const row = await this.database
       .client<FeedPostDatabaseSchema>()
@@ -158,10 +146,8 @@ export class FeedPostRepository {
     return row.reaction_count;
   }
 
-  // only transitions from 'pending' — a redelivered kudo.debited is a safe
-  // no-op. Returns whether this call actually flipped the row, so the
-  // listener can tell a genuine transition from a no-op redelivery and
-  // avoid re-announcing a post that's already been announced once.
+  // Only transitions from 'pending' — a redelivered kudo.debited event is
+  // a safe no-op.
   async publishByTransferId(transferId: string): Promise<boolean> {
     const row = await this.database
       .client<FeedPostDatabaseSchema>()
@@ -175,9 +161,8 @@ export class FeedPostRepository {
     return row !== undefined;
   }
 
-  // the deferred point-transfer bookkeeping (KudoReservedListener) never
-  // completed — only transitions from 'pending', same reasoning as
-  // publishByTransferId: a redelivered/retried event is a safe no-op either way.
+  // Only transitions from 'pending' — same redelivery-safety as
+  // publishByTransferId.
   async markFailedByTransferId(transferId: string): Promise<void> {
     await this.database
       .client<FeedPostDatabaseSchema>()
@@ -188,18 +173,8 @@ export class FeedPostRepository {
       .execute();
   }
 
-  // The read path for GET /kudos — full card data, not bare ids: author and
-  // (for kudo posts) recipient are resolved to their display name here
-  // rather than left for the client to look up separately. Keyset pagination on
-  // (created_at, id), never OFFSET (§8 — OFFSET walks discarded rows;
-  // keyset seeks via the index at any scroll depth). `author` is an INNER
-  // JOIN (every post has a real author); `point_transfer`/`recipient` are
-  // LEFT JOINs since only kudo-type posts have either. Reaction data
-  // (myReaction) and media are deliberately not joined here — those are
-  // FeedQueryService merging in separate ReactionRepository/
-  // FeedMediaRepository queries, since "did I react" / "what media" are
-  // different tables' concerns from "what posts exist," and (for media)
-  // joining risks duplicating a post row if it ever had more than one.
+  // Keyset pagination on (created_at, id) — never OFFSET, which re-walks
+  // discarded rows; keyset seeks via the index at any scroll depth.
   async listPublished(
     limit: number,
     cursor: FeedListCursor | null,

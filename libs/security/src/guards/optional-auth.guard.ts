@@ -9,10 +9,8 @@ import type { AuthenticatedRequest } from '../interfaces/authenticated-request.i
 import { AUTH_PROVIDER } from '../tokens';
 import { extractBearerToken } from './extract-bearer-token';
 
-// Never blocks the request: attaches `principal` when a token is present
-// and valid, leaves it undefined otherwise (missing, malformed, expired).
-// Routes read `request.principal` to tell an authenticated caller from an
-// anonymous one.
+// Never blocks the request — an invalid or missing token just leaves
+// `principal` undefined instead of throwing.
 @Injectable()
 export class OptionalAuthGuard implements CanActivate {
   constructor(

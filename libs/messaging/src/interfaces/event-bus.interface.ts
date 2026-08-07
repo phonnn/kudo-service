@@ -15,7 +15,7 @@ export interface EventBus {
    * Registers `handler` as its own durable consumer group (`groupName`), so
    * every subscriber gets its own copy of the stream regardless of how many
    * other groups are also reading it. Delivery is at-least-once — handlers
-   * must be idempotent (P6).
+   * must be idempotent.
    */
   subscribe(
     topic: string,

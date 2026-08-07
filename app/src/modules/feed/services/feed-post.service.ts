@@ -63,17 +63,6 @@ export interface FeedPage {
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 
-// Everything about feed_post — one entity, one service, same reasoning as
-// FeedPostRepository absorbing the read path: writes (send-kudo, §4 Phase
-// 1) and reads (listFeed, §13's "Read/write split (light CQRS)") both
-// belong to whoever owns feed_post, they just don't share a transaction —
-// listFeed never opens a UnitOfWork, since none of its three queries
-// (posts, reactions, media) mutate. `point` is only asked to do the one
-// synchronous thing whose failure the caller must see (P4): reserve the
-// budget. Everything else about actually recording the transfer is
-// deferred to PointTransferService.reserveKudoPoints(), reacting to
-// kudo.reserved — `point` doesn't create feed_post, and this service
-// doesn't create point_transfer.
 @Injectable()
 export class FeedPostService {
   constructor(
@@ -85,17 +74,11 @@ export class FeedPostService {
     private readonly outbox: OutboxRepository,
   ) {}
 
-  // the primary idempotency guard for sendKudo (§4) — the post is the
-  // first thing created, before point_transfer exists.
   findByIdempotencyKey(key: string): Promise<FeedPostRecord | null> {
     return this.feedPosts.findByIdempotencyKey(key);
   }
 
-  // Must be called from inside a unitOfWork.run() block — see
-  // ARCHITECTURE.md §4 Phase 1: the post (and its media, if any) has to
-  // commit atomically with the budget reserve, so this relies on the
-  // ambient transaction the caller already opened rather than opening its
-  // own (same pattern as ReceiverBalanceService.syncFromLedger).
+  // Must be called from inside a unitOfWork.run() block.
   async createPendingPost(command: CreatePendingPostCommand): Promise<void> {
     await this.feedPosts.create({
       id: command.postId,
@@ -106,8 +89,6 @@ export class FeedPostService {
       idempotencyKey: command.idempotencyKey,
     });
 
-    // images need no async validate/transcode step (§16), so this writes
-    // straight to 'ready' inside the same transaction as the post above.
     if (command.media) {
       await this.feedMedia.create({
         id: randomUUID(),
@@ -137,12 +118,8 @@ export class FeedPostService {
         };
       }
 
-      // the one synchronous, fail-fast call into `point` (§4 Phase 1) —
-      // participates in this same transaction, see reserveBudget()'s comment.
       await this.pointTransfers.reserveBudget(command.senderId, command.points);
 
-      // minted now, before point_transfer exists — KudoReservedListener
-      // uses this same id when it eventually creates that row.
       const transferId = randomUUID();
       const postId = randomUUID();
 
@@ -175,14 +152,6 @@ export class FeedPostService {
     });
   }
 
-  // The read path for GET /kudos. Orchestrates three independent queries —
-  // FeedPostRepository (posts), ReactionRepository (this viewer's
-  // reactions on that page), FeedMediaRepository (media on that page) —
-  // and merges them here rather than any repository knowing about
-  // another's table. None of the three mutate, so this never opens a
-  // UnitOfWork, and the reads don't need to be atomic with each other — a
-  // reaction/comment/media that lands between them just shows up on the
-  // next page load.
   async listFeed(
     viewerId: string,
     limitInput: number | undefined,

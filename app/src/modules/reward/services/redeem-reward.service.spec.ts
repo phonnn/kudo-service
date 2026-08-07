@@ -75,9 +75,8 @@ describe('RedeemRewardService', () => {
     expect(deps.redemptions.redeemAtomically).not.toHaveBeenCalled();
   });
 
-  // balance/stock/provisioning checks are enforced inside redeem_reward()
-  // itself, translated to these same domain errors by
-  // RedemptionRepository.redeemAtomically() — the service just propagates them.
+  // Balance/stock/provisioning checks are enforced inside redeem_reward()
+  // itself — the service just propagates the resulting domain error.
   it('propagates the domain error redeemAtomically translates from the database', async () => {
     const deps = createDeps();
     deps.redemptions.redeemAtomically.mockRejectedValue(

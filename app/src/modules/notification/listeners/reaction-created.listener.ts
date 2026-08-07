@@ -25,7 +25,6 @@ export class ReactionCreatedListener implements OnApplicationBootstrap {
 
   private handle(event: DomainEvent<ReactionCreatedPayload>): Promise<void> {
     const { postAuthorId, userId, postId, type } = event.payload;
-    // don't notify someone about reacting to their own post
     if (postAuthorId === userId) return Promise.resolve();
 
     return this.notifications.notify({

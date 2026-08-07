@@ -1,6 +1,5 @@
 import { sql, type Kysely } from 'kysely';
 
-// point_ledger (C) — SOURCE OF TRUTH, append-only (ARCHITECTURE.md §3)
 export async function up(db: Kysely<any>): Promise<void> {
   await db.schema
     .createTable('point_ledger')

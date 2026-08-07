@@ -22,15 +22,11 @@ export class RedeemRewardService {
     private readonly redemptions: RewardRedemptionPort,
   ) {}
 
-  // structurally the send-kudo shape (§6): an invariant-gated debit recorded
-  // in the ledger — but single-sided, no receiver, no compensation. The
-  // invariant-protected core (balance reserve, stock reserve, redemption +
-  // ledger + outbox writes) lives in the redeem_reward() Postgres function
-  // (see its migration) so it's one round trip instead of ~8. What's left
-  // here are plain reads with no side effects — safe outside a transaction,
-  // and only needed for fast, friendly failures before paying for that call.
-  // redeemAtomically() re-verifies the reward and re-derives the authoritative
-  // status regardless, so a stale read here can't cause an incorrect redeem.
+  // These are plain reads with no side effects, done only for fast, friendly
+  // failures before paying for redeemAtomically()'s round trip.
+  // redeemAtomically() re-verifies the reward and re-derives the
+  // authoritative status regardless, so a stale read here can't cause an
+  // incorrect redeem.
   async redeemReward(command: RedeemRewardCommand): Promise<RedeemedReward> {
     const existing = await this.redemptions.findByIdempotencyKey(
       command.idempotencyKey,

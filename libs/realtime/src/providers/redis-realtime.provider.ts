@@ -8,13 +8,9 @@ import type { RealtimeConfig } from '../realtime.config';
 
 const DEFAULT_CHANNEL_PREFIX = 'realtime:';
 
-// Cross-instance fan-out via Redis Pub/Sub (ARCHITECTURE.md §9): every app
-// instance runs its own RedisRealtimePush, all connected to the same
-// Redis, so a publish() on instance A reaches a stream() subscriber on
-// instance B. Pub/Sub, not Streams (unlike @kudo/messaging's EventBus) —
-// there's nothing to replay or ack here; a message with no subscriber
-// listening is simply gone, which is exactly right for a best-effort
-// realtime accelerant (P7) rather than a durable event.
+// Cross-instance fan-out via Redis Pub/Sub, not Streams — there's nothing
+// to replay or ack here; a message with no subscriber listening is simply
+// gone, which is fine for a best-effort realtime accelerant.
 //
 // Needs two connections, not one: node-redis puts a client that's issued
 // SUBSCRIBE into a mode where it can't run other commands, so publishing

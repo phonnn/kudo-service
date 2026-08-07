@@ -9,20 +9,9 @@ export interface RedeemAtomicallyParams {
   idempotencyKey: string;
 }
 
-// The seam RedeemRewardService depends on instead of RedemptionRepository
-// directly. RedemptionRepository's stored-procedure call (redeem_reward(),
-// see its migration) is today's only implementation of redeemAtomically()
-// A future alternative (e.g. the plain multi-statement-transaction version
-// this replaced) would implement the same contract and swap in via
-// reward.module.ts's provider binding, with no change to the service.
-//
 // The @throws list below is the contract: ANY implementation of
 // redeemAtomically() must throw exactly these domain errors for these
-// conditions. How an implementation arrives at the right one is its own
-// business — RedemptionRepository's raw Postgres error codes (KU001-KU005)
-// are that translation mechanism for ITS implementation only, and stay
-// local to redemption.repository.ts; a non-Postgres implementation would
-// have no codes to translate and would just throw these directly.
+// conditions.
 export interface RewardRedemptionPort {
   findByIdempotencyKey: (key: string) => Promise<RedemptionResult | null>;
 

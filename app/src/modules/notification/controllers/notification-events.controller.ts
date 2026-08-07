@@ -18,10 +18,9 @@ import { userRoom } from '../events/realtime-room';
 
 const HEARTBEAT_INTERVAL_MS = 20_000;
 
-// Point-to-point counterpart to feed's GET /kudos/events — same
-// StreamTicketGuard/ticket-exchange flow (EventSource can't set an
-// Authorization header), but subscribed to this one user's own room
-// instead of the shared feed broadcast room.
+// Same StreamTicketGuard/ticket-exchange flow as feed's events endpoint
+// (EventSource can't set an Authorization header), but subscribed to this
+// user's own room.
 @UseGuards(StreamTicketGuard)
 @Controller('notifications')
 export class NotificationEventsController {

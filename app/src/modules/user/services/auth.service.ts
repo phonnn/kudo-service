@@ -36,10 +36,9 @@ export class AuthService {
   ) {}
 
   async register(command: RegisterCommand): Promise<AuthResult> {
-    // fast-path check before paying for scrypt's CPU cost; create()'s
+    // Fast-path check before paying for scrypt's CPU cost — create()'s
     // onConflict is what's actually authoritative against a concurrent
-    // registration of the same email (same shape as RedeemRewardService's
-    // pre-check vs. its atomic write).
+    // registration of the same email.
     const existing = await this.users.findByEmail(command.email);
     if (existing) {
       throw new EmailAlreadyRegisteredError();

@@ -10,25 +10,17 @@ interface TicketEntry {
 const TICKET_TTL_MS = 30_000;
 
 // Single-use, short-lived exchange credential for streaming transports
-// whose browser API can't set an Authorization header — EventSource
-// (SSE) is the current case, but the browser WebSocket API has the exact
-// same limitation, so this isn't SSE-specific despite @kudo/realtime's
-// only shipped provider being 'sse' today. Naming this after SSE would
-// bake a transport name into @kudo/security, which is exactly what §11
-// says a tool must never do — a future 'websocket' RealtimeConfig
-// provider would need this same mechanism unchanged, only the guard using
-// it would differ.
+// whose browser API can't set an Authorization header — not SSE-specific;
+// a future 'websocket' provider would need this same mechanism unchanged.
 //
 // Rather than put the real access token in a query string — where it
-// leaks into access logs, browser history, and Referer headers — a
-// client that already authenticated normally (AuthGuard, real header)
-// exchanges that for a narrow, 30s, one-time ticket, and only the ticket
-// goes in the stream URL. Even a logged/captured ticket is worthless a
-// moment later.
+// leaks into access logs, browser history, and Referer headers — a client
+// that already authenticated normally exchanges that for a narrow, 30s,
+// one-time ticket, and only the ticket goes in the stream URL. Even a
+// logged/captured ticket is worthless a moment later.
 //
-// In-memory: fine for a single instance (matches every other realtime
-// scope-cut this session); a second instance would need this shared
-// (Redis, same as the fan-out gap it already accepted).
+// In-memory: fine for a single instance; a second instance would need this
+// shared (e.g. Redis).
 @Injectable()
 export class StreamTicketStore {
   private readonly tickets = new Map<string, TicketEntry>();

@@ -15,10 +15,8 @@ export interface SenderBalanceDatabaseSchema {
 export class SenderBalanceRepository {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
-  // TODO: not called from anywhere yet — there is no user module. Once one
-  // exists, it should call this on user creation. Kept here (not in
-  // sendKudo) because provisioning a user's budget is a user-lifecycle
-  // concern, not a send-a-kudo concern. Idempotent: no-op if already provisioned.
+  // TODO: not called from anywhere yet — there is no user module. Idempotent:
+  // no-op if already provisioned.
   async provision(userId: string): Promise<void> {
     await this.database
       .client<SenderBalanceDatabaseSchema>()
@@ -38,11 +36,8 @@ export class SenderBalanceRepository {
     return row !== undefined;
   }
 
-  // a plain, unlocked read — NOT the authoritative gate. Used only for
-  // Phase 1's fail-fast pre-check (§4); the real atomic decrement happens
-  // later via reserve(), in the same transaction as the ledger debit, so
-  // "balance moves with the ledger" stays true even after the split.
-  // Returns null if the sender has no row yet.
+  // Plain, unlocked read — not the authoritative gate. The atomic decrement
+  // happens in reserve(). Returns null if the sender has no row yet.
   async getRemaining(userId: string): Promise<number | null> {
     const row = await this.database
       .client<SenderBalanceDatabaseSchema>()
@@ -53,15 +48,9 @@ export class SenderBalanceRepository {
     return row ? row.remaining : null;
   }
 
-  // atomic conditional decrement (§4/§7's "UPDATE A(sender) WHERE spent +
-  // :points <= 200", expressed as a remaining-balance countdown instead).
-  // Locks only the sender's own row — self-contention only. Returns false
-  // both when the row doesn't exist and when the balance is too low.
-  // Called from reserveKudoPoints() (Phase 1.5, §4), not the Phase 1
-  // pre-check — a false here means getRemaining()'s earlier read went stale
-  // (a race, not a request-time error the sender ever sees synchronously),
-  // and the caller reacts by giving up on this specific kudo (KUDO_RESERVATION_FAILED),
-  // not by disambiguating via exists() the way sendKudo() used to.
+  // Atomic conditional decrement. Locks only the sender's own row —
+  // self-contention only. Returns false both when the row doesn't exist and
+  // when the balance is too low.
   async reserve(userId: string, points: number): Promise<boolean> {
     const result = await this.database
       .client<SenderBalanceDatabaseSchema>()
@@ -75,8 +64,6 @@ export class SenderBalanceRepository {
     return result !== undefined;
   }
 
-  // giving budget resets on the 1st (§1) — refill every existing user back
-  // to the full monthly budget.
   async refillAll(): Promise<void> {
     await this.database
       .client<SenderBalanceDatabaseSchema>()

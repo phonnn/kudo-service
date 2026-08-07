@@ -26,12 +26,9 @@ export interface NotificationPage {
   nextCursor: string | null;
 }
 
-// §9/P7's "persist-then-push," the one place it's implemented: the DB row
-// is the durable source of truth, written first; the realtime push to
-// user:{id} is best-effort acceleration on top of it, sent only if the
-// row was actually new (never push a duplicate for a deduped notify()).
-// Offline → row persists, client fetches unread via listForUser on next
-// connect. Nothing is lost; the live push is purely an accelerant.
+// The DB row is the durable source of truth, written first; the realtime
+// push is best-effort acceleration on top of it, sent only if the row was
+// actually new.
 @Injectable()
 export class NotificationService {
   constructor(

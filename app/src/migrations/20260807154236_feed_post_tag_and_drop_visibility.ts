@@ -3,10 +3,9 @@ import { sql, type Kysely } from 'kysely';
 // Three related cleanups to feed_post/point_transfer, done together since
 // none of the intermediate states were ever applied anywhere:
 //   1. `tag` — what a kudo celebrates (teamwork/ownership/innovation/
-//      customer_focus). Presentational (P2: "money and presentation are
-//      separate entities"), so it belongs on feed_post, not point_transfer.
-//      Nullable, same reasoning as point_transfer_id: only kudo-type posts
-//      have one. A CHECK on an IN-list already passes on NULL.
+//      customer_focus). Presentational, so it belongs on feed_post, not
+//      point_transfer. Nullable, same reasoning as point_transfer_id: only
+//      kudo-type posts have one. A CHECK on an IN-list already passes on NULL.
 //   2. point_transfer.core_value dropped — superseded by (1).
 //   3. feed_post.visibility dropped — scaffolding for audience-scoping
 //      that was never built: always 'global', never read anywhere.

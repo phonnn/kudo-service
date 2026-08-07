@@ -18,8 +18,6 @@ interface LocalTokenPayload {
 const DEFAULT_ACCESS_TOKEN_TTL = '15m';
 const DEFAULT_REFRESH_TOKEN_TTL = '7d';
 
-// Signs its own JWTs rather than fronting a real IdP — stands in until
-// Cognito (or similar) is wired up via SecurityConfig's `provider` union.
 // Access and refresh tokens use separate secrets so a leaked access token
 // can't be replayed as a refresh token.
 export class LocalAuthProvider implements AuthProvider {
@@ -27,8 +25,7 @@ export class LocalAuthProvider implements AuthProvider {
 
   // If `password` is present, this is a login, not a trusted re-issue —
   // check it against `passwordHash` before signing anything. Callers that
-  // already know `subject` is good (e.g. register(), right after creating
-  // the row) simply omit `password`.
+  // already know `subject` is good simply omit `password`.
   async issueToken(params: IssueTokenParams): Promise<TokenPair> {
     if (params.password !== undefined) {
       const matches =

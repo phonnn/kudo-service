@@ -1,8 +1,5 @@
-// Durable, cross-module domain events (outbox-guaranteed, at-least-once —
-// P6), distinct from realtime-events.ts's ephemeral UI-broadcast signals.
-// `notification` subscribes to these; it never taps into the feed room's
-// realtime push, which is a different concern (browsers currently viewing
-// the feed vs. "durably notify the one person who cares").
+// Durable, at-least-once domain events (outbox-guaranteed) — distinct from
+// realtime-events.ts's ephemeral broadcasts.
 export const COMMENT_CREATED = 'comment.created';
 export const REACTION_CREATED = 'reaction.created';
 

@@ -1,6 +1,5 @@
 import { sql, type Kysely } from 'kysely';
 
-// point_transfer — one logical send; the money record only (see point-transfer.repository.ts)
 export async function up(db: Kysely<any>): Promise<void> {
   await db.schema
     .createTable('point_transfer')

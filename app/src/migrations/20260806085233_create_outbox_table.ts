@@ -1,6 +1,5 @@
 import { sql, type Kysely } from 'kysely';
 
-// outbox — transactional outbox; guarantees event publish (see outbox.repository.ts)
 // id is text, not uuid: some producers key it deterministically (e.g.
 // `kudo:{transferId}:credited`) to dedupe enqueues across at-least-once redelivery
 export async function up(db: Kysely<any>): Promise<void> {

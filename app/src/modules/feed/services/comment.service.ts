@@ -52,12 +52,6 @@ export class CommentService {
 
       const count = await this.feedPosts.incrementCommentCount(command.postId);
 
-      // outbox-guaranteed (same transaction as the comment write, unlike
-      // the realtime push below) — `notification` reacts to this to
-      // notify the post's author. Not skipped for self-comments here:
-      // the listener is what decides whether to notify (§10-style
-      // separation — this service reports a fact, the listener decides
-      // meaning).
       const commentCreated: CommentCreatedPayload = {
         postId: command.postId,
         postAuthorId: post.authorId,
@@ -73,9 +67,8 @@ export class CommentService {
       return { comment: created, commentCount: count };
     });
 
-    // published only after the transaction actually committed — an event
-    // for a write that got rolled back would be a lie to every connected
-    // client.
+    // Published only after the transaction commits — a rolled-back write
+    // must never appear as an event to connected clients.
     const event: PostUpdatedEvent = { postId: command.postId, commentCount };
     this.realtime.publish(FEED_ROOM, { type: POST_UPDATED, data: event });
 

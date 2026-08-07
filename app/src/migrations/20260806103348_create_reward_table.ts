@@ -1,6 +1,5 @@
 import { sql, type Kysely } from 'kysely';
 
-// reward — the catalog; a plain entity (see reward.repository.ts)
 export async function up(db: Kysely<any>): Promise<void> {
   await db.schema
     .createTable('reward')

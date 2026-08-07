@@ -1,9 +1,8 @@
 import { sql, type Kysely } from 'kysely';
 
-// comment — belongs to a feed_post (like feed_media), not its own module:
-// the only thing that ever creates or reads a comment is "what's attached
-// to this post." No edit/delete in this pass — not asked for, keeps this
-// table append-only for now.
+// comment belongs to feed_post, not its own module — the only thing that
+// ever creates or reads a comment is "what's attached to this post."
+// No edit/delete for now; table is append-only.
 export async function up(db: Kysely<any>): Promise<void> {
   await db.schema
     .createTable('comment')

@@ -1,29 +1,19 @@
 import { sql, type Kysely } from 'kysely';
 
-// redeem_reward — the whole redemption invariant-core in one round trip
-// (ARCHITECTURE.md §6, §16). Deliberate exception to "no vendor-specific
-// business logic" (§11/§14): everything here is ALSO expressible as the
-// plain repository calls RedeemRewardService used before this migration
-// (see git history) — this function exists purely to collapse ~8 network
-// round trips into 1. Error signaling reuses the same "vendor code dies at
-// the repository" rule §10 already applies to 23505/40P01: each expected
-// business outcome raises a custom, stable error code that
-// RedemptionRepository.redeemAtomically() catches and translates; nothing
-// above that repository method knows this function exists.
+// Each expected business outcome raises a custom, stable error code
+// (KU001-KU005) that RedemptionRepository.redeemAtomically() translates
+// into a domain error — these codes must stay in sync with that map.
 //
 // Idempotent-replay and the reward's active/cost/stock are re-checked here
 // even though the app already checked them once — both reads are already
 // needed for the write below (stock lives on the same row), so re-checking
 // is free and closes the gap between the app's pre-check and this write.
 //
-// Known, accepted gap (matches the plain-repository version and §10's
-// broader status): two concurrent calls with the *same* idempotency key can
-// both pass the replay check and both attempt the insert; the loser gets a
-// raw 23505 rather than a graceful "already redeemed" response. Not solved
-// here for the same reason it isn't solved elsewhere yet — proportionate to
-// an internal tool at modest QPS (§16), not a correctness gap (the UNIQUE
-// constraint still prevents an actual double-spend, it just surfaces as an
-// untranslated error on that one losing request).
+// Known, accepted gap: two concurrent calls with the *same* idempotency key
+// can both pass the replay check and both attempt the insert; the loser gets
+// a raw 23505 rather than a graceful "already redeemed" response. The UNIQUE
+// constraint still prevents an actual double-spend — it just surfaces as an
+// untranslated error on that one losing request.
 export async function up(db: Kysely<any>): Promise<void> {
   await sql`
     CREATE FUNCTION redeem_reward(

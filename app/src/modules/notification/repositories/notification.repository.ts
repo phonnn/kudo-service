@@ -44,9 +44,8 @@ export interface NotificationDatabaseSchema {
 export class NotificationRepository {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
-  // ON CONFLICT is the authoritative dedup (P6) — (user_id, type, ref_id)
-  // UNIQUE — not a prior read; returns null when the conflict fired so
-  // NotificationService knows not to push a duplicate.
+  // ON CONFLICT is the authoritative dedup — (user_id, type, ref_id)
+  // UNIQUE — not a prior read; returns null when the conflict fires.
   async create(record: CreateNotification): Promise<NotificationRecord | null> {
     const row = await this.database
       .client<NotificationDatabaseSchema>()
@@ -98,13 +97,10 @@ export class NotificationRepository {
     return rows.map(toRecord);
   }
 
-  // ownership-scoped: only marks the row read if it actually belongs to
-  // userId, so one user can't mark another's notification read by
-  // guessing an id. Idempotent (P6) — deliberately NOT gated on
-  // `read_at IS NULL`: re-marking an already-read notification still
-  // returns true (it exists and is yours), rather than a confusing 404 on
-  // a harmless retry. Returns whether a row was found (existed + owned),
-  // not whether this call was the first to read it.
+  // Ownership-scoped — only marks the row read if it belongs to userId.
+  // Deliberately NOT gated on `read_at IS NULL`: re-marking an
+  // already-read notification still returns true, rather than a
+  // confusing 404 on a harmless retry.
   async markRead(id: string, userId: string): Promise<boolean> {
     const row = await this.database
       .client<NotificationDatabaseSchema>()

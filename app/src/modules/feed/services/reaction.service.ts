@@ -39,10 +39,8 @@ export class ReactionService {
         throw new FeedPostNotFoundError();
       }
 
-      // a type change on an existing reaction is still exactly one
-      // reaction — only a genuinely new row moves the count, and only a
-      // genuinely new reaction is worth notifying the post's author
-      // about (a type change isn't a new event).
+      // Only a genuinely new reaction moves the count and fires the
+      // notification event — a type change on an existing reaction doesn't.
       const { wasNew } = await this.reactions.upsert(postId, userId, type);
       if (!wasNew) return null;
 

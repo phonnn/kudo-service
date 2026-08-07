@@ -52,12 +52,9 @@ export class UserRepository {
     return row ? toRecord(row) : null;
   }
 
-  // onConflict().doNothing() is the authoritative dedup — the email
-  // UNIQUE constraint decides, not the caller's prior findByEmail read,
-  // which is only a fast-path check (same reasoning as RedeemRewardService's
-  // pre-check vs. redeem_reward()'s atomic insert). Returns null when the
-  // conflict fired instead of inserting, so the caller can tell the two
-  // apart.
+  // The email UNIQUE constraint is the authoritative dedup, not the caller's
+  // prior findByEmail read. Returns null when the conflict fired instead of
+  // inserting, so the caller can tell the two apart.
   async create(record: CreateUserRecord): Promise<UserRecord | null> {
     const row = await this.database
       .client<UserDatabaseSchema>()

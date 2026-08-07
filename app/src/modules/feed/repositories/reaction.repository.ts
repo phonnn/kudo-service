@@ -17,12 +17,9 @@ export interface ReactionDatabaseSchema {
 export class ReactionRepository {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
-  // UPSERT on the (post_id, user_id) PK: a fresh reaction inserts, a
-  // changed type replaces the row in place. `xmax = 0` is Postgres's
-  // standard way to tell "this row was just inserted" from "this row was
-  // updated by ON CONFLICT" in the same RETURNING — the caller needs that
-  // distinction to know whether reaction_count actually changed (a type
-  // change is still exactly one reaction, not a new one).
+  // `xmax = 0` in RETURNING is Postgres's way to tell an insert from an
+  // ON CONFLICT update in the same query — distinguishes a fresh reaction
+  // from a type change.
   async upsert(
     postId: string,
     userId: string,
@@ -41,9 +38,6 @@ export class ReactionRepository {
     return { wasNew: row.was_new };
   }
 
-  // idempotent: deleting a reaction that isn't there is a no-op, not an
-  // error (P6) — `wasRemoved` tells the service whether to decrement the
-  // count, since a redundant delete shouldn't touch it.
   async remove(
     postId: string,
     userId: string,
@@ -74,11 +68,6 @@ export class ReactionRepository {
     return (row?.type as ReactionType) ?? null;
   }
 
-  // Batched, not one correlated subquery per feed row — the caller
-  // (FeedQueryService) fetches a page of posts first, then asks here once
-  // for "which of these did this viewer react to." Keeps feed-post
-  // reading and reaction reading as two independently testable queries
-  // instead of one join.
   async findTypesByPostIdsAndUser(
     postIds: string[],
     userId: string,

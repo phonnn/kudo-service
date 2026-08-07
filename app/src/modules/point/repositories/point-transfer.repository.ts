@@ -31,10 +31,6 @@ export interface PointTransferDatabaseSchema {
 export class PointTransferRepository {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
-  // point_transfer keeps its own explicit idempotency lookup, independent of
-  // feed_post's (which guards the sync Phase 1 request-retry case) — this
-  // one is point_transfer's own guard for anything that needs to ask "does
-  // this idempotency key already have a transfer" directly.
   async findByIdempotencyKey(key: string): Promise<PointTransferRecord | null> {
     const row = await this.database
       .client<PointTransferDatabaseSchema>()
@@ -45,13 +41,9 @@ export class PointTransferRepository {
     return row ?? null;
   }
 
-  // called from KudoReservedListener, which must tolerate at-least-once
-  // redelivery of kudo.reserved (P6) — ON CONFLICT DO NOTHING makes the
-  // insert itself the idempotency guard rather than a separate check-then-act
-  // (same idiom as PointLedgerRepository.appendEarnCredit). Returns whether
-  // this call actually inserted the row, so the listener knows whether to
-  // proceed with the ledger append + kudo.debited enqueue or skip them
-  // because a prior delivery already did.
+  // ON CONFLICT DO NOTHING makes the insert itself the idempotency guard.
+  // Returns whether this call actually inserted the row, so the caller can
+  // tell a fresh reserve from an already-processed redelivery.
   async create(record: CreatePointTransfer): Promise<boolean> {
     const result = await this.database
       .client<PointTransferDatabaseSchema>()

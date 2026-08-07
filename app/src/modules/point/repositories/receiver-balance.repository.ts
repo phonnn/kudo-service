@@ -19,9 +19,8 @@ export interface ReceiverBalanceCheckpoint {
 export class ReceiverBalanceRepository {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
-  // TODO: not called from anywhere yet — there is no user module. Once one
-  // exists, it should call this on user creation, same as
-  // SenderBalanceRepository.provision(). Idempotent: no-op if already provisioned.
+  // TODO: not called from anywhere yet — there is no user module. Idempotent:
+  // no-op if already provisioned.
   async provision(userId: string): Promise<void> {
     await this.database
       .client<ReceiverBalanceDatabaseSchema>()
@@ -53,10 +52,8 @@ export class ReceiverBalanceRepository {
       : null;
   }
 
-  // Plain, unlocked read for display (§7/§8: "display is cheap and
-  // eventual; spending is exact and pays the lock cost only on the rare
-  // write" — this is the cheap side). Never the right call at spend time;
-  // use lockForUpdate() there. Returns null if the user has no row yet.
+  // Plain, unlocked read — never the right call at spend time; use
+  // lockForUpdate() there. Returns null if the user has no row yet.
   async getEarnedPoints(userId: string): Promise<number | null> {
     const row = await this.database
       .client<ReceiverBalanceDatabaseSchema>()
@@ -68,8 +65,6 @@ export class ReceiverBalanceRepository {
     return row ? Number(row.earned_points) : null;
   }
 
-  // returns the resulting earned_points so callers (e.g. redemption) can act
-  // on the authoritative post-write balance without a second round trip.
   async applyDelta(
     userId: string,
     points: number,

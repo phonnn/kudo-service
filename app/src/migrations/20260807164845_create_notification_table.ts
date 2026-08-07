@@ -1,11 +1,11 @@
 import { sql, type Kysely } from 'kysely';
 
-// notification — persisted before pushed (§9/P7): the row is the source of
-// truth, the realtime push to `user:{id}` is best-effort acceleration on
-// top of it. `ref_id` + the UNIQUE constraint make NotificationRepository
-// .create() idempotent under at-least-once redelivery of the domain event
-// that triggered it (P6) — e.g. a redelivered comment.created for the same
-// comment_id no-ops instead of double-notifying.
+// notification is persisted before pushed: the row is the source of truth,
+// the realtime push to `user:{id}` is best-effort acceleration on top of it.
+// `ref_id` + the UNIQUE constraint make NotificationRepository.create()
+// idempotent under at-least-once redelivery of the domain event that
+// triggered it — e.g. a redelivered comment.created for the same comment_id
+// no-ops instead of double-notifying.
 export async function up(db: Kysely<any>): Promise<void> {
   await db.schema
     .createTable('notification')
@@ -27,7 +27,7 @@ export async function up(db: Kysely<any>): Promise<void> {
     ])
     .execute();
 
-  // unread lookup, keyset order — matches the exact index shape ARCHITECTURE.md §3 specifies
+  // unread lookup, keyset order
   await db.schema
     .createIndex('notification_user_id_read_at_created_at_idx')
     .on('notification')

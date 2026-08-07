@@ -10,10 +10,6 @@ import { NotificationService } from '../services/notification.service';
 
 const CONSUMER_GROUP = 'notification-kudo-credited-consumer';
 
-// Same topic feed's and point's own KudoCreditedListener classes react to
-// (§16: "each module can have its own same-named listener for a topic it
-// cares about, since the class lives in, and is scoped to, that module")
-// — this one's job is only to notify the recipient, nothing else.
 @Injectable()
 export class KudoCreditedListener implements OnApplicationBootstrap {
   constructor(

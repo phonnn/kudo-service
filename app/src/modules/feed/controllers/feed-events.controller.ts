@@ -14,15 +14,9 @@ import { FEED_ROOM } from '../events/realtime-events';
 
 const HEARTBEAT_INTERVAL_MS = 20_000;
 
-// §9: live feed is server→client only (client actions — react, comment,
-// send — all go through normal REST, never up this stream), which is
-// exactly what makes SSE a fit rather than a compromise. StreamTicketGuard
-// (not AuthGuard) here — EventSource can't set an Authorization header, so
-// the client first calls POST /auth/stream-ticket normally (real header),
-// then connects as `/kudos/events?ticket=<ticket>`. See StreamTicketStore
-// for why that's a short-lived single-use ticket and not the real access
-// token — and why it's not named after SSE even though SSE is the only
-// transport using it today.
+// StreamTicketGuard, not AuthGuard — EventSource can't set an Authorization
+// header, so the client exchanges a short-lived ticket via POST
+// /auth/stream-ticket first, then connects with ?ticket=<ticket>.
 @UseGuards(StreamTicketGuard)
 @Controller('kudos')
 export class FeedEventsController {
@@ -37,9 +31,9 @@ export class FeedEventsController {
       })),
     );
 
-    // periodic no-op event, not a raw SSE comment (Nest's MessageEvent has
-    // no comment-line escape hatch) — any write resets an idle proxy's
-    // timeout just as well; clients simply don't listen for 'heartbeat'.
+    // A real event, not an SSE comment line — Nest's MessageEvent has no
+    // comment escape hatch, but any write resets an idle proxy's timeout
+    // just as well; clients simply don't listen for 'heartbeat'.
     const heartbeat$ = interval(HEARTBEAT_INTERVAL_MS).pipe(
       map((): MessageEvent => ({ type: 'heartbeat', data: {} })),
     );

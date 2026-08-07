@@ -1,6 +1,5 @@
 import { sql, type Kysely } from 'kysely';
 
-// feed_post — the primary social object; extensible (see feed-post.repository.ts)
 export async function up(db: Kysely<any>): Promise<void> {
   await db.schema
     .createTable('feed_post')
