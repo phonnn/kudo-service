@@ -74,6 +74,9 @@
     ],
     "rootDir": "app/src",
     "testRegex": ".*\\.spec\\.ts$",
+    "setupFiles": [
+      "<rootDir>/../test/jest.setup-env.js"
+    ],
     "moduleNameMapper": {
       "^@kudo/database$": "<rootDir>/../../libs/database/src",
       "^@kudo/messaging$": "<rootDir>/../../libs/messaging/src",

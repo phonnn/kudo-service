@@ -1,0 +1,9 @@
+process.env.APP_NAME ??= 'kudo-service-test';
+process.env.DATABASE_URL ??= 'postgres://test:test@localhost:5432/test';
+process.env.MQ_URL ??= 'redis://localhost:6379';
+process.env.STORAGE_ENDPOINT ??= 'http://localhost:9000';
+process.env.STORAGE_BUCKET ??= 'test-bucket';
+process.env.STORAGE_ACCESS_KEY_ID ??= 'test';
+process.env.STORAGE_SECRET_ACCESS_KEY ??= 'test';
+process.env.AUTH_ACCESS_TOKEN_SECRET ??= 'test-access-secret';
+process.env.AUTH_REFRESH_TOKEN_SECRET ??= 'test-refresh-secret';
