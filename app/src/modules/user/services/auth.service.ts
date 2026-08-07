@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { UnitOfWork } from '@kudo/database';
 import {
   AUTH_PROVIDER,
   hashValue,
@@ -8,6 +9,8 @@ import {
 import { EmailAlreadyRegisteredError } from '../errors/email-already-registered.error';
 import { InvalidCredentialsError } from '../errors/invalid-credentials.error';
 import { InvalidRefreshTokenError } from '../errors/invalid-refresh-token.error';
+import { ReceiverBalanceRepository } from '../../point/repositories/receiver-balance.repository';
+import { SenderBalanceRepository } from '../../point/repositories/sender-balance.repository';
 import { UserRepository } from '../repositories/user.repository';
 
 export interface RegisterCommand {
@@ -31,7 +34,10 @@ export interface AuthResult {
 @Injectable()
 export class AuthService {
   constructor(
+    private readonly unitOfWork: UnitOfWork,
     private readonly users: UserRepository,
+    private readonly senderBalances: SenderBalanceRepository,
+    private readonly receiverBalances: ReceiverBalanceRepository,
     @Inject(AUTH_PROVIDER) private readonly authProvider: AuthProvider,
   ) {}
 
@@ -45,10 +51,17 @@ export class AuthService {
     }
 
     const passwordHash = await hashValue(command.password);
-    const user = await this.users.create({
-      email: command.email,
-      name: command.name,
-      passwordHash,
+    const user = await this.unitOfWork.run(async () => {
+      const created = await this.users.create({
+        email: command.email,
+        name: command.name,
+        passwordHash,
+      });
+      if (!created) return null;
+
+      await this.senderBalances.provision(created.id);
+      await this.receiverBalances.provision(created.id);
+      return created;
     });
     if (!user) {
       throw new EmailAlreadyRegisteredError();

@@ -1,8 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Database } from '@kudo/database';
+import { PointConfig } from '../../../config';
 import { DATABASE } from '../../../infra/token.constant';
-
-const GIVING_BUDGET = 200;
 
 export interface SenderBalanceDatabaseSchema {
   sender_balance: {
@@ -13,15 +12,17 @@ export interface SenderBalanceDatabaseSchema {
 
 @Injectable()
 export class SenderBalanceRepository {
-  constructor(@Inject(DATABASE) private readonly database: Database) {}
+  constructor(
+    @Inject(DATABASE) private readonly database: Database,
+    private readonly pointConfig: PointConfig,
+  ) {}
 
-  // TODO: not called from anywhere yet — there is no user module. Idempotent:
-  // no-op if already provisioned.
+  // Idempotent: no-op if already provisioned.
   async provision(userId: string): Promise<void> {
     await this.database
       .client<SenderBalanceDatabaseSchema>()
       .insertInto('sender_balance')
-      .values({ user_id: userId, remaining: GIVING_BUDGET })
+      .values({ user_id: userId, remaining: this.pointConfig.givingBudget })
       .onConflict((conflict) => conflict.column('user_id').doNothing())
       .execute();
   }
@@ -68,7 +69,7 @@ export class SenderBalanceRepository {
     await this.database
       .client<SenderBalanceDatabaseSchema>()
       .updateTable('sender_balance')
-      .set({ remaining: GIVING_BUDGET })
+      .set({ remaining: this.pointConfig.givingBudget })
       .execute();
   }
 }

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { InfraModule } from '../../infra/infra.module';
+import { ConfigModule } from '../../config';
 import { OutboxModule } from '../outbox';
 import { BalanceController } from './controllers/balance.controller';
 import { KudoReservedListener } from './listeners/kudo-reserved.listener';
@@ -12,7 +13,7 @@ import { PointTransferRepository } from './repositories/point-transfer.repositor
 import { ReceiverBalanceRepository } from './repositories/receiver-balance.repository';
 import { SenderBalanceRepository } from './repositories/sender-balance.repository';
 @Module({
-  imports: [InfraModule, OutboxModule],
+  imports: [InfraModule, ConfigModule, OutboxModule],
   controllers: [BalanceController],
   providers: [
     SenderBalanceRepository,
