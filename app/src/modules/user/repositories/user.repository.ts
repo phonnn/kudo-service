@@ -26,6 +26,24 @@ export interface UserDatabaseSchema {
   };
 }
 
+export interface UserListItem {
+  id: string;
+  name: string;
+  createdAt: Date;
+}
+
+export interface UserListCursor {
+  createdAt: Date;
+  id: string;
+}
+
+export interface ListUsersParams {
+  search: string | null;
+  excludeUserId: string;
+  limit: number;
+  cursor: UserListCursor | null;
+}
+
 @Injectable()
 export class UserRepository {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
@@ -50,6 +68,46 @@ export class UserRepository {
       .executeTakeFirst();
 
     return row ? toRecord(row) : null;
+  }
+
+  // Keyset pagination on (created_at, id) — never OFFSET, which re-walks
+  // discarded rows; keyset seeks via the index at any scroll depth.
+  async list(params: ListUsersParams): Promise<UserListItem[]> {
+    let query = this.database
+      .client<UserDatabaseSchema>()
+      .selectFrom('user')
+      .select(['id', 'name', 'created_at'])
+      .where('id', '!=', params.excludeUserId)
+      .orderBy('created_at', 'desc')
+      .orderBy('id', 'desc')
+      .limit(params.limit);
+
+    if (params.search) {
+      const pattern = `%${params.search}%`;
+      query = query.where((eb) =>
+        eb.or([eb('name', 'ilike', pattern), eb('email', 'ilike', pattern)]),
+      );
+    }
+
+    if (params.cursor) {
+      const cursor = params.cursor;
+      query = query.where((eb) =>
+        eb.or([
+          eb('created_at', '<', cursor.createdAt),
+          eb.and([
+            eb('created_at', '=', cursor.createdAt),
+            eb('id', '<', cursor.id),
+          ]),
+        ]),
+      );
+    }
+
+    const rows = await query.execute();
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      createdAt: row.created_at,
+    }));
   }
 
   // The email UNIQUE constraint is the authoritative dedup, not the caller's
