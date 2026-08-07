@@ -5,6 +5,7 @@ import {
   KUDO_CREDITED,
   type KudoCreditedPayload,
 } from '../../point/events/kudo.events';
+import { UserRepository } from '../../user/repositories/user.repository';
 import { NotificationType } from '../dto/notification-type.enum';
 import { NotificationService } from '../services/notification.service';
 
@@ -15,6 +16,7 @@ export class KudoCreditedListener implements OnApplicationBootstrap {
   constructor(
     @Inject(EVENT_BUS) private readonly bus: EventBus,
     private readonly notifications: NotificationService,
+    private readonly users: UserRepository,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -23,8 +25,10 @@ export class KudoCreditedListener implements OnApplicationBootstrap {
     );
   }
 
-  private handle(event: DomainEvent<KudoCreditedPayload>): Promise<void> {
-    return this.notifications.notify({
+  private async handle(event: DomainEvent<KudoCreditedPayload>): Promise<void> {
+    const sender = await this.users.findById(event.payload.senderId);
+
+    await this.notifications.notify({
       userId: event.payload.recipientId,
       type: NotificationType.KUDO_RECEIVED,
       refId: event.payload.transferId,
@@ -32,6 +36,7 @@ export class KudoCreditedListener implements OnApplicationBootstrap {
         transferId: event.payload.transferId,
         postId: event.payload.postId,
         points: event.payload.points,
+        senderName: sender?.name ?? null,
       },
     });
   }

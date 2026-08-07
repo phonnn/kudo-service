@@ -5,6 +5,7 @@ import {
   REACTION_CREATED,
   type ReactionCreatedPayload,
 } from '../../feed/events/domain-events';
+import { UserRepository } from '../../user/repositories/user.repository';
 import { NotificationType } from '../dto/notification-type.enum';
 import { NotificationService } from '../services/notification.service';
 
@@ -15,6 +16,7 @@ export class ReactionCreatedListener implements OnApplicationBootstrap {
   constructor(
     @Inject(EVENT_BUS) private readonly bus: EventBus,
     private readonly notifications: NotificationService,
+    private readonly users: UserRepository,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -23,15 +25,19 @@ export class ReactionCreatedListener implements OnApplicationBootstrap {
     );
   }
 
-  private handle(event: DomainEvent<ReactionCreatedPayload>): Promise<void> {
+  private async handle(
+    event: DomainEvent<ReactionCreatedPayload>,
+  ): Promise<void> {
     const { postAuthorId, userId, postId, type } = event.payload;
-    if (postAuthorId === userId) return Promise.resolve();
+    if (postAuthorId === userId) return;
 
-    return this.notifications.notify({
+    const sender = await this.users.findById(userId);
+
+    await this.notifications.notify({
       userId: postAuthorId,
       type: NotificationType.REACTION,
       refId: event.id,
-      payload: { postId, userId, type },
+      payload: { postId, userId, type, senderName: sender?.name ?? null },
     });
   }
 }

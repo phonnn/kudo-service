@@ -27,6 +27,7 @@ export interface KudoDebitedPayload {
 export interface KudoCreditedPayload {
   transferId: string;
   postId: string;
+  senderId: string;
   recipientId: string;
   points: number;
 }

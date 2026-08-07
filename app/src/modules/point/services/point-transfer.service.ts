@@ -112,6 +112,7 @@ export class PointTransferService {
       const kudoCredited: KudoCreditedPayload = {
         transferId: payload.transferId,
         postId: payload.postId,
+        senderId: payload.senderId,
         recipientId: payload.recipientId,
         points: payload.points,
       };

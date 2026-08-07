@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { InfraModule } from '../../infra/infra.module';
+import { UserModule } from '../user';
 import { NotificationController } from './controllers/notification.controller';
 import { NotificationEventsController } from './controllers/notification-events.controller';
 import { CommentCreatedListener } from './listeners/comment-created.listener';
@@ -9,7 +10,7 @@ import { NotificationRepository } from './repositories/notification.repository';
 import { NotificationService } from './services/notification.service';
 
 @Module({
-  imports: [InfraModule],
+  imports: [InfraModule, UserModule],
   controllers: [NotificationController, NotificationEventsController],
   providers: [
     NotificationRepository,
