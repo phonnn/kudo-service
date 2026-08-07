@@ -3,6 +3,7 @@ import {
   Controller,
   NotFoundException,
   Param,
+  ParseUUIDPipe,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -18,7 +19,7 @@ export class CommentController {
 
   @Post()
   async create(
-    @Param('postId') postId: string,
+    @Param('postId', ParseUUIDPipe) postId: string,
     @Body() dto: CreateCommentDto,
     @CurrentPrincipal() principal: Principal,
   ) {

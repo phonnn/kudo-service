@@ -1,7 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { UnitOfWork } from '@kudo/database';
+import type { RealtimePush } from '@kudo/realtime';
+import { REALTIME_PUSH } from '../../../infra/token.constant';
+import { OutboxRepository } from '../../outbox';
 import { FeedPostNotFoundError } from '../errors/feed-post-not-found.error';
+import {
+  COMMENT_CREATED,
+  type CommentCreatedPayload,
+} from '../events/domain-events';
+import {
+  FEED_ROOM,
+  POST_UPDATED,
+  type PostUpdatedEvent,
+} from '../events/realtime-events';
 import {
   CommentRepository,
   type CommentRecord,
@@ -20,25 +32,53 @@ export class CommentService {
     private readonly unitOfWork: UnitOfWork,
     private readonly feedPosts: FeedPostRepository,
     private readonly comments: CommentRepository,
+    private readonly outbox: OutboxRepository,
+    @Inject(REALTIME_PUSH) private readonly realtime: RealtimePush,
   ) {}
 
-  addComment(command: AddCommentCommand): Promise<CommentRecord> {
-    return this.unitOfWork.run(async () => {
+  async addComment(command: AddCommentCommand): Promise<CommentRecord> {
+    const { comment, commentCount } = await this.unitOfWork.run(async () => {
       const post = await this.feedPosts.findPublishedById(command.postId);
       if (!post) {
         throw new FeedPostNotFoundError();
       }
 
-      const comment = await this.comments.create({
+      const created = await this.comments.create({
         id: randomUUID(),
         postId: command.postId,
         authorId: command.authorId,
         body: command.body,
       });
 
-      await this.feedPosts.incrementCommentCount(command.postId);
+      const count = await this.feedPosts.incrementCommentCount(command.postId);
 
-      return comment;
+      // outbox-guaranteed (same transaction as the comment write, unlike
+      // the realtime push below) — `notification` reacts to this to
+      // notify the post's author. Not skipped for self-comments here:
+      // the listener is what decides whether to notify (§10-style
+      // separation — this service reports a fact, the listener decides
+      // meaning).
+      const commentCreated: CommentCreatedPayload = {
+        postId: command.postId,
+        postAuthorId: post.authorId,
+        commentId: created.id,
+        authorId: command.authorId,
+      };
+      await this.outbox.enqueue({
+        id: created.id,
+        topic: COMMENT_CREATED,
+        payload: commentCreated as unknown as Record<string, unknown>,
+      });
+
+      return { comment: created, commentCount: count };
     });
+
+    // published only after the transaction actually committed — an event
+    // for a write that got rolled back would be a lie to every connected
+    // client.
+    const event: PostUpdatedEvent = { postId: command.postId, commentCount };
+    this.realtime.publish(FEED_ROOM, { type: POST_UPDATED, data: event });
+
+    return comment;
   }
 }

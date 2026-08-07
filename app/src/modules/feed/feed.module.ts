@@ -5,6 +5,7 @@ import { PointModule } from '../point/point.module';
 import { KudoCreditedListener } from './listeners/kudo-credited.listener';
 import { KudoReservationFailedListener } from './listeners/kudo-reservation-failed.listener';
 import { FeedController } from './controllers/feed.controller';
+import { FeedEventsController } from './controllers/feed-events.controller';
 import { MediaController } from './controllers/media.controller';
 import { CommentController } from './controllers/comment.controller';
 import { ReactionController } from './controllers/reaction.controller';
@@ -20,6 +21,7 @@ import { ReactionService } from './services/reaction.service';
   imports: [InfraModule, OutboxModule, PointModule],
   controllers: [
     FeedController,
+    FeedEventsController,
     MediaController,
     CommentController,
     ReactionController,
