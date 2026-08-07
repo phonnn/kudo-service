@@ -20,5 +20,86 @@ jobs:
       - run: yarn install --frozen-lockfile
       - run: yarn lint
       - run: yarn test
-      - run: yarn test:e2e
       - run: yarn build
+
+  e2e:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: goodjob
+          POSTGRES_PASSWORD: goodjob
+          POSTGRES_DB: goodjob
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U goodjob -d goodjob"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      APP_NAME: kudo-service
+      PORT: 3000
+      DATABASE_URL: postgres://goodjob:goodjob@localhost:5432/goodjob
+      MQ_URL: redis://localhost:6379
+      STORAGE_ENDPOINT: http://localhost:9000
+      STORAGE_BUCKET: goodjob-media
+      STORAGE_REGION: us-east-1
+      STORAGE_ACCESS_KEY_ID: minioadmin
+      STORAGE_SECRET_ACCESS_KEY: minioadmin
+      AUTH_ACCESS_TOKEN_SECRET: ci-access-secret
+      AUTH_REFRESH_TOKEN_SECRET: ci-refresh-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - run: yarn install --frozen-lockfile
+
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data --console-address ":9001"
+
+      - name: Wait for MinIO
+        run: |
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:9000/minio/health/live && exit 0
+            sleep 2
+          done
+          echo "MinIO did not become healthy in time" >&2
+          exit 1
+
+      - name: Create MinIO bucket
+        run: |
+          MINIO_ENDPOINT=http://localhost:9000 \
+          MINIO_ROOT_USER=minioadmin \
+          MINIO_ROOT_PASSWORD=minioadmin \
+          MINIO_BUCKET=goodjob-media \
+          docker run --rm --network host \
+            -e MC_HOST_target=http://minioadmin:minioadmin@localhost:9000 \
+            minio/mc:latest mb --ignore-existing target/goodjob-media
+
+      - run: yarn migrate:latest
+      - run: yarn test:e2e
