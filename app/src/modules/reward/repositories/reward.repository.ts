@@ -9,6 +9,13 @@ export interface RewardRecord {
   active: boolean;
 }
 
+export interface RewardListItem {
+  id: string;
+  name: string;
+  costPoints: number;
+  stock: number | null;
+}
+
 export interface RewardDatabaseSchema {
   reward: {
     id: string;
@@ -39,5 +46,27 @@ export class RewardRepository {
       stock: row.stock,
       active: row.active,
     };
+  }
+
+  // the browsable catalog — inactive rewards are never listed (they can
+  // still be looked up by id via findById, e.g. for a redemption made
+  // before deactivation), and finite-stock rewards at 0 remain listed
+  // rather than disappearing, so a client can show "out of stock"
+  // instead of the item just vanishing.
+  async listActive(): Promise<RewardListItem[]> {
+    const rows = await this.database
+      .client<RewardDatabaseSchema>()
+      .selectFrom('reward')
+      .select(['id', 'name', 'cost_points', 'stock'])
+      .where('active', '=', true)
+      .orderBy('name')
+      .execute();
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      costPoints: row.cost_points,
+      stock: row.stock,
+    }));
   }
 }
