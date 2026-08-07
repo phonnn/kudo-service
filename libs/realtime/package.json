@@ -1,0 +1,10 @@
+{
+  "name": "@kudo/realtime",
+  "version": "0.0.1",
+  "private": true,
+  "main": "../../dist/libs/realtime/src/index.js",
+  "types": "src/index.ts",
+  "dependencies": {
+    "redis": "^5.8.1"
+  }
+}

@@ -5,6 +5,7 @@ import {
   HttpCode,
   NotFoundException,
   Param,
+  ParseUUIDPipe,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -21,7 +22,7 @@ export class ReactionController {
   @Post()
   @HttpCode(204)
   async set(
-    @Param('postId') postId: string,
+    @Param('postId', ParseUUIDPipe) postId: string,
     @Body() dto: SetReactionDto,
     @CurrentPrincipal() principal: Principal,
   ) {
@@ -38,7 +39,7 @@ export class ReactionController {
   @Delete()
   @HttpCode(204)
   remove(
-    @Param('postId') postId: string,
+    @Param('postId', ParseUUIDPipe) postId: string,
     @CurrentPrincipal() principal: Principal,
   ) {
     return this.reactions.removeReaction(postId, principal.subject);

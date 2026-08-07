@@ -10,5 +10,7 @@ export { createAuthProvider } from './security.factory';
 export { AUTH_PROVIDER } from './tokens';
 export { AuthGuard } from './guards/auth.guard';
 export { OptionalAuthGuard } from './guards/optional-auth.guard';
+export { StreamTicketGuard } from './guards/stream-ticket.guard';
 export { CurrentPrincipal } from './decorators/current-principal.decorator';
 export { hashValue, verifyValue } from './helpers/hash.helper';
+export { StreamTicketStore } from './stores/stream-ticket.store';

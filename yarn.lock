@@ -1301,6 +1301,14 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@kudo/realtime@workspace:libs/realtime":
+  version: 0.0.0-use.local
+  resolution: "@kudo/realtime@workspace:libs/realtime"
+  dependencies:
+    redis: "npm:^5.8.1"
+  languageName: unknown
+  linkType: soft
+
 "@kudo/security@workspace:libs/security":
   version: 0.0.0-use.local
   resolution: "@kudo/security@workspace:libs/security"

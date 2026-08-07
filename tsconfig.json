@@ -17,6 +17,7 @@
     "paths": {
       "@kudo/database": ["libs/database/src"],
       "@kudo/messaging": ["libs/messaging/src"],
+      "@kudo/realtime": ["libs/realtime/src"],
       "@kudo/security": ["libs/security/src"],
       "@kudo/storage": ["libs/storage/src"]
     },

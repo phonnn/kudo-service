@@ -3,6 +3,7 @@ import {
   Controller,
   Headers,
   Param,
+  ParseUUIDPipe,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -15,7 +16,7 @@ export class RewardController {
   constructor(private readonly redeemRewardService: RedeemRewardService) {}
   @Post(':id/redeem')
   redeem(
-    @Param('id') rewardId: string,
+    @Param('id', ParseUUIDPipe) rewardId: string,
     @CurrentPrincipal() principal: Principal,
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {

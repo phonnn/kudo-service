@@ -4,7 +4,14 @@ import {
   Controller,
   Post,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
+import {
+  AuthGuard,
+  CurrentPrincipal,
+  StreamTicketStore,
+  type Principal,
+} from '@kudo/security';
 import { AuthService } from '../services/auth.service';
 import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
@@ -15,7 +22,10 @@ import { InvalidRefreshTokenError } from '../errors/invalid-refresh-token.error'
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly streamTickets: StreamTicketStore,
+  ) {}
 
   @Post('register')
   async register(@Body() dto: RegisterDto) {
@@ -51,5 +61,11 @@ export class AuthController {
       }
       throw error;
     }
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('stream-ticket')
+  issueStreamTicket(@CurrentPrincipal() principal: Principal) {
+    return { ticket: this.streamTickets.issue(principal) };
   }
 }

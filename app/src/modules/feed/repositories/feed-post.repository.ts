@@ -114,12 +114,16 @@ export class FeedPostRepository {
   // gate for comment/reaction writes: a post that doesn't exist, isn't
   // published yet, or was soft-deleted isn't something you can interact
   // with — mirrors "feed visible ⟺ money settled" (§4): if it's not
-  // visible in the feed, it's not commentable/reactable either.
-  async findPublishedById(id: string): Promise<{ id: string } | null> {
+  // visible in the feed, it's not commentable/reactable either. Returns
+  // authorId too — CommentService/ReactionService need it to know who to
+  // notify (and to skip notifying someone about their own post).
+  async findPublishedById(
+    id: string,
+  ): Promise<{ id: string; authorId: string } | null> {
     const row = await this.database
       .client<FeedPostDatabaseSchema>()
       .selectFrom('feed_post')
-      .select(['id'])
+      .select(['id', 'author_id as authorId'])
       .where('id', '=', id)
       .where('status', '=', 'published')
       .where('deleted_at', 'is', null)
@@ -128,33 +132,47 @@ export class FeedPostRepository {
     return row ?? null;
   }
 
-  async incrementCommentCount(postId: string): Promise<void> {
-    await this.database
+  // Returns the post-increment count (not void) so callers can push it
+  // straight into a realtime "post.updated" event without a second read.
+  async incrementCommentCount(postId: string): Promise<number> {
+    const row = await this.database
       .client<FeedPostDatabaseSchema>()
       .updateTable('feed_post')
       .set((eb) => ({ comment_count: eb('comment_count', '+', 1) }))
       .where('id', '=', postId)
-      .execute();
+      .returning('comment_count')
+      .executeTakeFirstOrThrow();
+
+    return row.comment_count;
   }
 
-  async adjustReactionCount(postId: string, delta: 1 | -1): Promise<void> {
-    await this.database
+  async adjustReactionCount(postId: string, delta: 1 | -1): Promise<number> {
+    const row = await this.database
       .client<FeedPostDatabaseSchema>()
       .updateTable('feed_post')
       .set((eb) => ({ reaction_count: eb('reaction_count', '+', delta) }))
       .where('id', '=', postId)
-      .execute();
+      .returning('reaction_count')
+      .executeTakeFirstOrThrow();
+
+    return row.reaction_count;
   }
 
-  // only transitions from 'pending' — a redelivered kudo.debited is a safe no-op
-  async publishByTransferId(transferId: string): Promise<void> {
-    await this.database
+  // only transitions from 'pending' — a redelivered kudo.debited is a safe
+  // no-op. Returns whether this call actually flipped the row, so the
+  // listener can tell a genuine transition from a no-op redelivery and
+  // avoid re-announcing a post that's already been announced once.
+  async publishByTransferId(transferId: string): Promise<boolean> {
+    const row = await this.database
       .client<FeedPostDatabaseSchema>()
       .updateTable('feed_post')
       .set({ status: 'published' })
       .where('point_transfer_id', '=', transferId)
       .where('status', '=', 'pending')
-      .execute();
+      .returning('id')
+      .executeTakeFirst();
+
+    return row !== undefined;
   }
 
   // the deferred point-transfer bookkeeping (KudoReservedListener) never

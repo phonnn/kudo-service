@@ -4,6 +4,7 @@ import type { ZodTypeAny } from 'zod';
 import { appEnvSchema, AppConfig } from './app';
 import { databaseEnvSchema, DatabaseConfigService } from './database';
 import { messagingEnvSchema, MessagingConfigService } from './messaging';
+import { realtimeEnvSchema, RealtimeConfigService } from './realtime';
 import { securityEnvSchema, SecurityConfigService } from './security';
 import { storageEnvSchema, StorageConfigService } from './storage';
 
@@ -11,6 +12,7 @@ const envSchemas: ZodTypeAny[] = [
   appEnvSchema,
   databaseEnvSchema,
   messagingEnvSchema,
+  realtimeEnvSchema,
   securityEnvSchema,
   storageEnvSchema,
 ];
@@ -51,6 +53,7 @@ function validateEnv(config: Record<string, unknown>): Record<string, unknown> {
     AppConfig,
     DatabaseConfigService,
     MessagingConfigService,
+    RealtimeConfigService,
     SecurityConfigService,
     StorageConfigService,
   ],
@@ -58,6 +61,7 @@ function validateEnv(config: Record<string, unknown>): Record<string, unknown> {
     AppConfig,
     DatabaseConfigService,
     MessagingConfigService,
+    RealtimeConfigService,
     SecurityConfigService,
     StorageConfigService,
   ],
