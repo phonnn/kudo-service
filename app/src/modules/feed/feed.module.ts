@@ -14,7 +14,6 @@ import { FeedPostRepository } from './repositories/feed-post.repository';
 import { ReactionRepository } from './repositories/reaction.repository';
 import { CommentService } from './services/comment.service';
 import { FeedPostService } from './services/feed-post.service';
-import { FeedQueryService } from './services/feed-query.service';
 import { ReactionService } from './services/reaction.service';
 
 @Module({
@@ -31,7 +30,6 @@ import { ReactionService } from './services/reaction.service';
     CommentRepository,
     ReactionRepository,
     FeedPostService,
-    FeedQueryService,
     CommentService,
     ReactionService,
     KudoCreditedListener,

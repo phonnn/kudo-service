@@ -12,6 +12,7 @@ import { UserRepository } from '../repositories/user.repository';
 
 export interface RegisterCommand {
   email: string;
+  name: string;
   password: string;
 }
 
@@ -23,6 +24,7 @@ export interface LoginCommand {
 export interface AuthResult {
   userId: string;
   email: string;
+  name: string;
   tokens: TokenPair;
 }
 
@@ -46,6 +48,7 @@ export class AuthService {
     const passwordHash = await hashValue(command.password);
     const user = await this.users.create({
       email: command.email,
+      name: command.name,
       passwordHash,
     });
     if (!user) {
@@ -54,10 +57,10 @@ export class AuthService {
 
     const tokens = await this.authProvider.issueToken({
       subject: user.id,
-      claims: { email: user.email },
+      claims: { email: user.email, name: user.name },
     });
 
-    return { userId: user.id, email: user.email, tokens };
+    return { userId: user.id, email: user.email, name: user.name, tokens };
   }
 
   async login(command: LoginCommand): Promise<AuthResult> {
@@ -70,7 +73,7 @@ export class AuthService {
     try {
       tokens = await this.authProvider.issueToken({
         subject: user.id,
-        claims: { email: user.email },
+        claims: { email: user.email, name: user.name },
         password: command.password,
         passwordHash: user.passwordHash,
       });
@@ -78,7 +81,7 @@ export class AuthService {
       throw new InvalidCredentialsError();
     }
 
-    return { userId: user.id, email: user.email, tokens };
+    return { userId: user.id, email: user.email, name: user.name, tokens };
   }
 
   async refresh(refreshToken: string): Promise<TokenPair> {

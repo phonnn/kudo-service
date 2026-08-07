@@ -9,20 +9,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard, CurrentPrincipal, type Principal } from '@kudo/security';
-import { FeedPostService } from '../services/feed-post.service';
-import {
-  FeedQueryService,
-  type FeedPage,
-} from '../services/feed-query.service';
+import { FeedPostService, type FeedPage } from '../services/feed-post.service';
 import { SendKudoDto } from '../dto/send-kudo.dto';
 import { ListFeedQueryDto } from '../dto/list-feed-query.dto';
 
 @Controller('kudos')
 export class FeedController {
-  constructor(
-    private readonly feedPosts: FeedPostService,
-    private readonly feedQuery: FeedQueryService,
-  ) {}
+  constructor(private readonly feedPosts: FeedPostService) {}
 
   @UseGuards(AuthGuard)
   @Post()
@@ -46,7 +39,7 @@ export class FeedController {
     @Query() query: ListFeedQueryDto,
     @CurrentPrincipal() principal: Principal,
   ): Promise<FeedPage> {
-    return this.feedQuery.listFeed(
+    return this.feedPosts.listFeed(
       principal.subject,
       query.limit,
       query.cursor,

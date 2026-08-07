@@ -18,13 +18,19 @@ export interface CreateFeedPost {
 
 export interface FeedListItem {
   id: string;
-  authorId: string;
+  type: string;
   body: string;
-  points: number | null;
-  tag: string | null;
+  authorId: string;
+  authorName: string;
   commentCount: number;
   reactionCount: number;
   createdAt: Date;
+  kudo: {
+    recipientId: string;
+    recipientName: string;
+    points: number;
+    tag: string | null;
+  } | null;
 }
 
 export interface FeedListCursor {
@@ -49,10 +55,15 @@ export interface FeedPostDatabaseSchema {
     reaction_count: Generated<number>;
   };
   // joined only by listPublished() below — feed_post's own writes never
-  // touch point_transfer, this is the one read that needs both.
+  // touch point_transfer/user, this is the one read that needs all three.
   point_transfer: {
     id: string;
+    recipient_id: string;
     points: number;
+  };
+  user: {
+    id: string;
+    name: string;
   };
 }
 
@@ -159,15 +170,18 @@ export class FeedPostRepository {
       .execute();
   }
 
-  // The read path for GET /kudos (§13's "Read/write split (light CQRS)" —
-  // still just a method on this repository, not a separate transactional
-  // write): keyset pagination on (created_at, id), never OFFSET (§8 —
-  // OFFSET walks discarded rows; keyset seeks via the index at any scroll
-  // depth). LEFT JOIN because point_transfer_id is nullable for future
-  // non-kudo post types. Reaction data (myReaction) is deliberately not
-  // joined here — that's FeedQueryService merging in a separate
-  // ReactionRepository query, since "did I react" is a different table's
-  // concern from "what posts exist."
+  // The read path for GET /kudos — full card data, not bare ids: author and
+  // (for kudo posts) recipient are resolved to their display name here
+  // rather than left for the client to look up separately. Keyset pagination on
+  // (created_at, id), never OFFSET (§8 — OFFSET walks discarded rows;
+  // keyset seeks via the index at any scroll depth). `author` is an INNER
+  // JOIN (every post has a real author); `point_transfer`/`recipient` are
+  // LEFT JOINs since only kudo-type posts have either. Reaction data
+  // (myReaction) and media are deliberately not joined here — those are
+  // FeedQueryService merging in separate ReactionRepository/
+  // FeedMediaRepository queries, since "did I react" / "what media" are
+  // different tables' concerns from "what posts exist," and (for media)
+  // joining risks duplicating a post row if it ever had more than one.
   async listPublished(
     limit: number,
     cursor: FeedListCursor | null,
@@ -175,22 +189,32 @@ export class FeedPostRepository {
     let query = this.database
       .client<FeedPostDatabaseSchema>()
       .selectFrom('feed_post')
+      .innerJoin('user as author', 'author.id', 'feed_post.author_id')
       .leftJoin(
         'point_transfer',
         'point_transfer.id',
         'feed_post.point_transfer_id',
       )
+      .leftJoin(
+        'user as recipient',
+        'recipient.id',
+        'point_transfer.recipient_id',
+      )
       .where('feed_post.status', '=', 'published')
       .where('feed_post.deleted_at', 'is', null)
       .select([
         'feed_post.id as id',
-        'feed_post.author_id as authorId',
+        'feed_post.type as type',
         'feed_post.body as body',
-        'point_transfer.points as points',
-        'feed_post.tag as tag',
+        'feed_post.author_id as authorId',
+        'author.name as authorName',
         'feed_post.comment_count as commentCount',
         'feed_post.reaction_count as reactionCount',
         'feed_post.created_at as createdAt',
+        'point_transfer.recipient_id as recipientId',
+        'recipient.name as recipientName',
+        'point_transfer.points as points',
+        'feed_post.tag as tag',
       ])
       .orderBy('feed_post.created_at', 'desc')
       .orderBy('feed_post.id', 'desc')
@@ -208,6 +232,26 @@ export class FeedPostRepository {
       );
     }
 
-    return query.execute();
+    const rows = await query.execute();
+
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      body: row.body,
+      authorId: row.authorId,
+      authorName: row.authorName,
+      commentCount: row.commentCount,
+      reactionCount: row.reactionCount,
+      createdAt: row.createdAt,
+      kudo:
+        row.recipientId && row.recipientName && row.points !== null
+          ? {
+              recipientId: row.recipientId,
+              recipientName: row.recipientName,
+              points: row.points,
+              tag: row.tag,
+            }
+          : null,
+    }));
   }
 }

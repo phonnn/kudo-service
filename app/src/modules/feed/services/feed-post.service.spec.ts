@@ -6,6 +6,7 @@ import type { PointTransferService } from '../../point/services/point-transfer.s
 import type { OutboxRepository } from '../../outbox';
 import type { FeedMediaRepository } from '../repositories/feed-media.repository';
 import type { FeedPostRepository } from '../repositories/feed-post.repository';
+import type { ReactionRepository } from '../repositories/reaction.repository';
 import { FeedPostService } from './feed-post.service';
 
 /* eslint-disable @typescript-eslint/unbound-method */
@@ -99,6 +100,7 @@ interface MockDeps {
     Pick<FeedPostRepository, 'findByIdempotencyKey' | 'create'>
   >;
   feedMedia: jest.Mocked<Pick<FeedMediaRepository, 'create'>>;
+  reactions: jest.Mocked<Pick<ReactionRepository, 'findTypesByPostIdsAndUser'>>;
   pointTransfers: jest.Mocked<Pick<PointTransferService, 'reserveBudget'>>;
   outbox: jest.Mocked<Pick<OutboxRepository, 'enqueue'>>;
 }
@@ -110,6 +112,9 @@ function createDeps(): MockDeps {
       create: jest.fn(),
     },
     feedMedia: { create: jest.fn() },
+    reactions: {
+      findTypesByPostIdsAndUser: jest.fn().mockResolvedValue(new Map()),
+    },
     pointTransfers: {
       reserveBudget: jest.fn().mockResolvedValue(undefined),
     },
@@ -127,6 +132,7 @@ function createService(
     uow,
     deps.feedPosts as unknown as FeedPostRepository,
     deps.feedMedia as unknown as FeedMediaRepository,
+    deps.reactions as unknown as ReactionRepository,
     deps.pointTransfers as unknown as PointTransferService,
     deps.outbox as unknown as OutboxRepository,
   );

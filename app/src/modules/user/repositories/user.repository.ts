@@ -6,11 +6,13 @@ import { DATABASE } from '../../../infra/token.constant';
 export interface UserRecord {
   id: string;
   email: string;
+  name: string;
   passwordHash: string;
 }
 
 export interface CreateUserRecord {
   email: string;
+  name: string;
   passwordHash: string;
 }
 
@@ -18,6 +20,7 @@ export interface UserDatabaseSchema {
   user: {
     id: string;
     email: string;
+    name: string;
     password_hash: string;
     created_at: Generated<Date>;
   };
@@ -31,7 +34,7 @@ export class UserRepository {
     const row = await this.database
       .client<UserDatabaseSchema>()
       .selectFrom('user')
-      .select(['id', 'email', 'password_hash'])
+      .select(['id', 'email', 'name', 'password_hash'])
       .where('email', '=', email)
       .executeTakeFirst();
 
@@ -42,7 +45,7 @@ export class UserRepository {
     const row = await this.database
       .client<UserDatabaseSchema>()
       .selectFrom('user')
-      .select(['id', 'email', 'password_hash'])
+      .select(['id', 'email', 'name', 'password_hash'])
       .where('id', '=', id)
       .executeTakeFirst();
 
@@ -62,10 +65,11 @@ export class UserRepository {
       .values({
         id: randomUUID(),
         email: record.email,
+        name: record.name,
         password_hash: record.passwordHash,
       })
       .onConflict((conflict) => conflict.column('email').doNothing())
-      .returning(['id', 'email', 'password_hash'])
+      .returning(['id', 'email', 'name', 'password_hash'])
       .executeTakeFirst();
 
     return row ? toRecord(row) : null;
@@ -73,7 +77,15 @@ export class UserRepository {
 }
 
 function toRecord(
-  row: Pick<UserDatabaseSchema['user'], 'id' | 'email' | 'password_hash'>,
+  row: Pick<
+    UserDatabaseSchema['user'],
+    'id' | 'email' | 'name' | 'password_hash'
+  >,
 ): UserRecord {
-  return { id: row.id, email: row.email, passwordHash: row.password_hash };
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    passwordHash: row.password_hash,
+  };
 }
