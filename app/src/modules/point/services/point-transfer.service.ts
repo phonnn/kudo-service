@@ -91,8 +91,10 @@ export class PointTransferService {
         points: payload.points,
       };
 
+      // outbox.id is globally unique, not scoped per topic — the bare
+      // transferId is already taken by this same transfer's kudo.reserved row.
       await this.outbox.enqueue({
-        id: payload.transferId,
+        id: `kudo:${payload.transferId}:debited`,
         topic: KUDO_DEBITED,
         payload: kudoDebited as unknown as Record<string, unknown>,
       });
