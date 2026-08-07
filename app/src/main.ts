@@ -5,6 +5,12 @@ import { AppConfig } from './config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const appConfig = app.get(AppConfig);
+  app.enableCors({
+    origin: appConfig.corsOrigins,
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key'],
+  });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -12,7 +18,6 @@ async function bootstrap() {
       transform: true,
     }),
   );
-  const appConfig = app.get(AppConfig);
   await app.listen(appConfig.port);
 
   Logger.log(

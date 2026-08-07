@@ -17,4 +17,8 @@ export class AppConfig {
   get port(): number {
     return this.configService.get('PORT', { infer: true });
   }
+
+  get corsOrigins(): string[] {
+    return this.configService.get('CORS_ORIGIN', { infer: true });
+  }
 }
