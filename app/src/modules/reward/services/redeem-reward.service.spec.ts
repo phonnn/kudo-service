@@ -1,10 +1,14 @@
+import { Test } from '@nestjs/testing';
 import { InsufficientBalanceError } from '../errors/insufficient-balance.error';
 import { RewardInactiveError } from '../errors/reward-inactive.error';
 import { RewardNotFoundError } from '../errors/reward-not-found.error';
-import type { RewardRedemptionPort } from '../interfaces/reward-redemption-port.interface';
-import type {
-  RewardRecord,
+import {
+  REWARD_REDEMPTION_PORT,
+  type RewardRedemptionPort,
+} from '../interfaces/reward-redemption-port.interface';
+import {
   RewardRepository,
+  type RewardRecord,
 } from '../repositories/reward.repository';
 import { RedeemRewardService } from './redeem-reward.service';
 
@@ -23,8 +27,8 @@ describe('RedeemRewardService', () => {
   };
 
   it('delegates to the atomic redeem after the fast pre-checks pass', async () => {
-    const deps = createDeps();
-    const result = await createService(deps).redeemReward(command);
+    const { service, deps } = await createService();
+    const result = await service.redeemReward(command);
 
     expect(deps.redemptions.redeemAtomically).toHaveBeenCalledWith({
       userId: 'user-1',
@@ -38,13 +42,13 @@ describe('RedeemRewardService', () => {
   });
 
   it('returns the existing redemption for an idempotent retry without touching the reward', async () => {
-    const deps = createDeps();
+    const { service, deps } = await createService();
     deps.redemptions.findByIdempotencyKey.mockResolvedValue({
       id: 'existing-redemption',
       status: 'confirmed',
     });
 
-    await expect(createService(deps).redeemReward(command)).resolves.toEqual({
+    await expect(service.redeemReward(command)).resolves.toEqual({
       redemptionId: 'existing-redemption',
       status: 'confirmed',
     });
@@ -53,37 +57,35 @@ describe('RedeemRewardService', () => {
   });
 
   it('throws when the reward does not exist, without calling redeemAtomically', async () => {
-    const deps = createDeps();
+    const { service, deps } = await createService();
     deps.rewards.findById.mockResolvedValue(null);
 
-    await expect(createService(deps).redeemReward(command)).rejects.toThrow(
+    await expect(service.redeemReward(command)).rejects.toThrow(
       RewardNotFoundError,
     );
     expect(deps.redemptions.redeemAtomically).not.toHaveBeenCalled();
   });
 
   it('throws when the reward is inactive, without calling redeemAtomically', async () => {
-    const deps = createDeps();
+    const { service, deps } = await createService();
     deps.rewards.findById.mockResolvedValue({
       ...activeReward,
       active: false,
     });
 
-    await expect(createService(deps).redeemReward(command)).rejects.toThrow(
+    await expect(service.redeemReward(command)).rejects.toThrow(
       RewardInactiveError,
     );
     expect(deps.redemptions.redeemAtomically).not.toHaveBeenCalled();
   });
 
-  // Balance/stock/provisioning checks are enforced inside redeem_reward()
-  // itself — the service just propagates the resulting domain error.
   it('propagates the domain error redeemAtomically translates from the database', async () => {
-    const deps = createDeps();
+    const { service, deps } = await createService();
     deps.redemptions.redeemAtomically.mockRejectedValue(
       new InsufficientBalanceError(),
     );
 
-    await expect(createService(deps).redeemReward(command)).rejects.toThrow(
+    await expect(service.redeemReward(command)).rejects.toThrow(
       InsufficientBalanceError,
     );
   });
@@ -113,9 +115,19 @@ function createDeps(): MockDeps {
   };
 }
 
-function createService(deps: MockDeps): RedeemRewardService {
-  return new RedeemRewardService(
-    deps.rewards as unknown as RewardRepository,
-    deps.redemptions,
-  );
+async function createService(): Promise<{
+  service: RedeemRewardService;
+  deps: MockDeps;
+}> {
+  const deps = createDeps();
+
+  const module = await Test.createTestingModule({
+    providers: [
+      RedeemRewardService,
+      { provide: RewardRepository, useValue: deps.rewards },
+      { provide: REWARD_REDEMPTION_PORT, useValue: deps.redemptions },
+    ],
+  }).compile();
+
+  return { service: module.get(RedeemRewardService), deps };
 }

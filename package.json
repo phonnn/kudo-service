@@ -77,6 +77,8 @@
     "moduleNameMapper": {
       "^@kudo/database$": "<rootDir>/../../libs/database/src",
       "^@kudo/messaging$": "<rootDir>/../../libs/messaging/src",
+      "^@kudo/realtime$": "<rootDir>/../../libs/realtime/src",
+      "^@kudo/security$": "<rootDir>/../../libs/security/src",
       "^@kudo/storage$": "<rootDir>/../../libs/storage/src"
     },
     "transform": {

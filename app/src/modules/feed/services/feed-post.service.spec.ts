@@ -1,15 +1,14 @@
-import type { UnitOfWork } from '@kudo/database';
+import { Test } from '@nestjs/testing';
+import { UnitOfWork } from '@kudo/database';
 import { Tag } from '../dto/tag.enum';
 import { InsufficientBudgetError } from '../../point/errors/insufficient-budget.error';
 import { SelfRecognitionError } from '../../point/errors/self-recognition.error';
-import type { PointTransferService } from '../../point/services/point-transfer.service';
-import type { OutboxRepository } from '../../outbox';
-import type { FeedMediaRepository } from '../repositories/feed-media.repository';
-import type { FeedPostRepository } from '../repositories/feed-post.repository';
-import type { ReactionRepository } from '../repositories/reaction.repository';
+import { PointTransferService } from '../../point/services/point-transfer.service';
+import { OutboxRepository } from '../../outbox';
+import { FeedMediaRepository } from '../repositories/feed-media.repository';
+import { FeedPostRepository } from '../repositories/feed-post.repository';
+import { ReactionRepository } from '../repositories/reaction.repository';
 import { FeedPostService } from './feed-post.service';
-
-/* eslint-disable @typescript-eslint/unbound-method */
 
 describe('FeedPostService', () => {
   describe('sendKudo', () => {
@@ -23,8 +22,8 @@ describe('FeedPostService', () => {
     };
 
     it('reserves the budget, creates the post, and enqueues kudo.reserved', async () => {
-      const deps = createDeps();
-      const result = await createService(deps).sendKudo(command);
+      const { service, deps } = await createService();
+      const result = await service.sendKudo(command);
 
       expect(deps.pointTransfers.reserveBudget).toHaveBeenCalledWith(
         'sender',
@@ -41,12 +40,12 @@ describe('FeedPostService', () => {
     });
 
     it('passes the already-uploaded image through to feed_media creation', async () => {
-      const deps = createDeps();
+      const { service, deps } = await createService();
       const media = {
         objectKey: 'media/abc',
         domain: 'http://minio:9000/kudo',
       };
-      await createService(deps).sendKudo({ ...command, media });
+      await service.sendKudo({ ...command, media });
 
       expect(deps.feedMedia.create).toHaveBeenCalledWith(
         expect.objectContaining(media),
@@ -54,14 +53,14 @@ describe('FeedPostService', () => {
     });
 
     it('returns the existing post for an idempotent retry, without reserving again', async () => {
-      const deps = createDeps();
+      const { service, deps } = await createService();
       deps.feedPosts.findByIdempotencyKey.mockResolvedValue({
         id: 'post',
         status: 'published',
         transferId: 'transfer',
       });
 
-      await expect(createService(deps).sendKudo(command)).resolves.toEqual({
+      await expect(service.sendKudo(command)).resolves.toEqual({
         transferId: 'transfer',
         postId: 'post',
         status: 'published',
@@ -70,25 +69,25 @@ describe('FeedPostService', () => {
     });
 
     it('propagates the domain error reserveBudget throws, without creating a post', async () => {
-      const deps = createDeps();
+      const { service, deps } = await createService();
       deps.pointTransfers.reserveBudget.mockRejectedValue(
         new InsufficientBudgetError(),
       );
 
-      await expect(createService(deps).sendKudo(command)).rejects.toThrow(
+      await expect(service.sendKudo(command)).rejects.toThrow(
         InsufficientBudgetError,
       );
       expect(deps.feedPosts.create).not.toHaveBeenCalled();
     });
 
-    it('rejects self recognition before opening a transaction', () => {
-      const deps = createDeps();
-      const uow = { run: jest.fn() } as unknown as UnitOfWork;
+    it('rejects self recognition before opening a transaction', async () => {
+      const uow = { run: jest.fn() };
+      const { service } = await createService({
+        uow: uow as unknown as UnitOfWork,
+      });
+
       expect(() =>
-        createService(deps, uow).sendKudo({
-          ...command,
-          recipientId: 'sender',
-        }),
+        service.sendKudo({ ...command, recipientId: 'sender' }),
       ).toThrow(SelfRecognitionError);
       expect(uow.run).not.toHaveBeenCalled();
     });
@@ -122,18 +121,27 @@ function createDeps(): MockDeps {
   };
 }
 
-function createService(
-  deps: MockDeps,
-  uow: UnitOfWork = {
-    run: (work: () => Promise<unknown>) => work(),
-  } as unknown as UnitOfWork,
-): FeedPostService {
-  return new FeedPostService(
-    uow,
-    deps.feedPosts as unknown as FeedPostRepository,
-    deps.feedMedia as unknown as FeedMediaRepository,
-    deps.reactions as unknown as ReactionRepository,
-    deps.pointTransfers as unknown as PointTransferService,
-    deps.outbox as unknown as OutboxRepository,
-  );
+async function createService(
+  options: { uow?: UnitOfWork } = {},
+): Promise<{ service: FeedPostService; deps: MockDeps }> {
+  const deps = createDeps();
+  const uow =
+    options.uow ??
+    ({
+      run: (work: () => Promise<unknown>) => work(),
+    } as unknown as UnitOfWork);
+
+  const module = await Test.createTestingModule({
+    providers: [
+      FeedPostService,
+      { provide: UnitOfWork, useValue: uow },
+      { provide: FeedPostRepository, useValue: deps.feedPosts },
+      { provide: FeedMediaRepository, useValue: deps.feedMedia },
+      { provide: ReactionRepository, useValue: deps.reactions },
+      { provide: PointTransferService, useValue: deps.pointTransfers },
+      { provide: OutboxRepository, useValue: deps.outbox },
+    ],
+  }).compile();
+
+  return { service: module.get(FeedPostService), deps };
 }
