@@ -1,5 +1,5 @@
 import type { UnitOfWork } from '@kudo/database';
-import { CoreValue } from '../../point/dto/core-value.enum';
+import { Tag } from '../dto/tag.enum';
 import { InsufficientBudgetError } from '../../point/errors/insufficient-budget.error';
 import { SelfRecognitionError } from '../../point/errors/self-recognition.error';
 import type { PointTransferService } from '../../point/services/point-transfer.service';
@@ -16,7 +16,7 @@ describe('FeedPostService', () => {
       senderId: 'sender',
       recipientId: 'recipient',
       points: 20,
-      coreValue: CoreValue.TEAMWORK,
+      tag: Tag.TEAMWORK,
       description: 'Great job',
       idempotencyKey: 'request-1',
     };

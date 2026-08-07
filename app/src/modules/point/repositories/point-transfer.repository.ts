@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Database, Generated } from '@kudo/database';
 import { DATABASE } from '../../../infra/token.constant';
-import type { CoreValue } from '../dto/core-value.enum';
 
 export interface PointTransferRecord {
   id: string;
@@ -13,7 +12,6 @@ export interface CreatePointTransfer {
   senderId: string;
   recipientId: string;
   points: number;
-  coreValue: CoreValue;
   idempotencyKey: string;
 }
 
@@ -23,7 +21,6 @@ export interface PointTransferDatabaseSchema {
     sender_id: string;
     recipient_id: string;
     points: number;
-    core_value: string;
     status: 'pending' | 'completed' | 'reversed';
     idempotency_key: string;
     created_at: Generated<Date>;
@@ -64,7 +61,6 @@ export class PointTransferRepository {
         sender_id: record.senderId,
         recipient_id: record.recipientId,
         points: record.points,
-        core_value: record.coreValue,
         status: 'pending',
         idempotency_key: record.idempotencyKey,
       })

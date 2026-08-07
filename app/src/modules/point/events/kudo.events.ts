@@ -1,5 +1,3 @@
-import type { CoreValue } from '../dto/core-value.enum';
-
 export const KUDO_RESERVED = 'kudo.reserved';
 export const KUDO_RESERVATION_FAILED = 'kudo.reservation-failed';
 export const KUDO_DEBITED = 'kudo.debited';
@@ -16,7 +14,6 @@ export interface KudoReservedPayload {
   senderId: string;
   recipientId: string;
   points: number;
-  coreValue: CoreValue;
   idempotencyKey: string;
 }
 

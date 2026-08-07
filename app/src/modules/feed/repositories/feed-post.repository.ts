@@ -11,6 +11,7 @@ export interface CreateFeedPost {
   id: string;
   authorId: string;
   description: string;
+  tag: string;
   transferId: string;
   idempotencyKey: string;
 }
@@ -20,7 +21,7 @@ export interface FeedListItem {
   authorId: string;
   body: string;
   points: number | null;
-  coreValue: string | null;
+  tag: string | null;
   commentCount: number;
   reactionCount: number;
   createdAt: Date;
@@ -38,9 +39,9 @@ export interface FeedPostDatabaseSchema {
     type: string;
     body: string;
     point_transfer_id: string | null;
-    visibility: string;
     status: 'pending' | 'published' | 'failed';
     idempotency_key: string;
+    tag: string | null;
     created_at: Generated<Date>;
     edited_at: NullableTimestamp;
     deleted_at: NullableTimestamp;
@@ -52,7 +53,6 @@ export interface FeedPostDatabaseSchema {
   point_transfer: {
     id: string;
     points: number;
-    core_value: string;
   };
 }
 
@@ -91,9 +91,9 @@ export class FeedPostRepository {
         type: 'kudo',
         body: record.description,
         point_transfer_id: record.transferId,
-        visibility: 'global',
         status: 'pending',
         idempotency_key: record.idempotencyKey,
+        tag: record.tag,
         edited_at: null,
         deleted_at: null,
       })
@@ -187,7 +187,7 @@ export class FeedPostRepository {
         'feed_post.author_id as authorId',
         'feed_post.body as body',
         'point_transfer.points as points',
-        'point_transfer.core_value as coreValue',
+        'feed_post.tag as tag',
         'feed_post.comment_count as commentCount',
         'feed_post.reaction_count as reactionCount',
         'feed_post.created_at as createdAt',

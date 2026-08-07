@@ -84,7 +84,6 @@ export class PointTransferService {
         senderId: payload.senderId,
         recipientId: payload.recipientId,
         points: payload.points,
-        coreValue: payload.coreValue,
         idempotencyKey: payload.idempotencyKey,
       });
 

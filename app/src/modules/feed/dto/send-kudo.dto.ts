@@ -10,7 +10,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { CoreValue } from '../../point/dto/core-value.enum';
+import { Tag } from './tag.enum';
 
 // the object_key/domain a POST /media/presign upload already resolved to
 // (§4 Phase 0) — never a fresh upload, so no contentType/kind here.
@@ -22,7 +22,7 @@ export class SendKudoMediaDto {
 export class SendKudoDto {
   @IsUUID() recipientId!: string;
   @IsInt() @Min(10) @Max(50) points!: number;
-  @IsEnum(CoreValue) coreValue!: CoreValue;
+  @IsEnum(Tag) tag!: Tag;
   @IsString() @Length(1, 2000) description!: string;
   @IsOptional()
   @ValidateNested()

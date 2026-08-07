@@ -1,5 +1,4 @@
 import type { UnitOfWork } from '@kudo/database';
-import { CoreValue } from '../dto/core-value.enum';
 import { InsufficientBudgetError } from '../errors/insufficient-budget.error';
 import { SenderNotProvisionedError } from '../errors/sender-not-provisioned.error';
 import type { OutboxRepository } from '../../outbox';
@@ -49,7 +48,6 @@ describe('PointTransferService', () => {
       senderId: 'sender',
       recipientId: 'recipient',
       points: 20,
-      coreValue: CoreValue.TEAMWORK,
       idempotencyKey: 'request-1',
     };
 

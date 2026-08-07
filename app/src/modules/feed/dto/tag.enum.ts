@@ -1,4 +1,4 @@
-export enum CoreValue {
+export enum Tag {
   TEAMWORK = 'teamwork',
   OWNERSHIP = 'ownership',
   INNOVATION = 'innovation',

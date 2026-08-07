@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { UnitOfWork } from '@kudo/database';
 import { randomUUID } from 'node:crypto';
-import type { CoreValue } from '../../point/dto/core-value.enum';
+import type { Tag } from '../dto/tag.enum';
 import {
   KUDO_RESERVED,
   type KudoReservedPayload,
@@ -26,6 +26,7 @@ export interface CreatePendingPostCommand {
   postId: string;
   authorId: string;
   description: string;
+  tag: Tag;
   transferId: string;
   idempotencyKey: string;
   media?: CreatePendingPostMedia;
@@ -35,7 +36,7 @@ export interface SendKudoCommand {
   senderId: string;
   recipientId: string;
   points: number;
-  coreValue: CoreValue;
+  tag: Tag;
   description: string;
   idempotencyKey: string;
   media?: CreatePendingPostMedia;
@@ -76,6 +77,7 @@ export class FeedPostService {
       id: command.postId,
       authorId: command.authorId,
       description: command.description,
+      tag: command.tag,
       transferId: command.transferId,
       idempotencyKey: command.idempotencyKey,
     });
@@ -124,6 +126,7 @@ export class FeedPostService {
         postId,
         authorId: command.senderId,
         description: command.description,
+        tag: command.tag,
         transferId,
         idempotencyKey: command.idempotencyKey,
         media: command.media,
@@ -135,7 +138,6 @@ export class FeedPostService {
         senderId: command.senderId,
         recipientId: command.recipientId,
         points: command.points,
-        coreValue: command.coreValue,
         idempotencyKey: command.idempotencyKey,
       };
 
