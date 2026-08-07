@@ -68,4 +68,4 @@ docker run -p 3000:3000 kudo-service
 
 ## CI
 
-`.github/workflows/ci.yml` runs install, lint, unit tests, e2e tests, and a build check on every push and pull request to `master`.
+`.github/workflows/ci.yml` runs install, lint, unit tests, e2e tests, and a build check on every push and pull request to `dev`.
