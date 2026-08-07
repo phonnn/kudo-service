@@ -6,6 +6,7 @@ import { BalanceController } from './controllers/balance.controller';
 import { KudoReservedListener } from './listeners/kudo-reserved.listener';
 import { KudoDebitedListener } from './listeners/kudo-debited.listener';
 import { KudoCreditedListener } from './listeners/kudo-credited.listener';
+import { PointLedgerService } from './services/point-ledger.service';
 import { PointTransferService } from './services/point-transfer.service';
 import { ReceiverBalanceService } from './services/receiver-balance.service';
 import { PointLedgerRepository } from './repositories/point-ledger.repository';
@@ -22,6 +23,7 @@ import { SenderBalanceRepository } from './repositories/sender-balance.repositor
     ReceiverBalanceRepository,
     PointTransferService,
     ReceiverBalanceService,
+    PointLedgerService,
     KudoReservedListener,
     KudoDebitedListener,
     KudoCreditedListener,

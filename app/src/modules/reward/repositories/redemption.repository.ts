@@ -23,6 +23,24 @@ export interface RedemptionDatabaseSchema {
     status: 'confirmed' | 'failed';
     created_at: Generated<Date>;
   };
+  reward: {
+    id: string;
+    name: string;
+  };
+}
+
+export interface RedemptionListItem {
+  id: string;
+  rewardId: string;
+  rewardName: string;
+  costPoints: number;
+  status: 'confirmed' | 'failed';
+  createdAt: Date;
+}
+
+export interface RedemptionListCursor {
+  createdAt: Date;
+  id: string;
 }
 
 // Translates redeem_reward()'s raw Postgres error codes into the domain
@@ -74,5 +92,44 @@ export class RedemptionRepository implements RewardRedemptionPort {
       }
       throw error;
     }
+  }
+
+  // Keyset pagination on (created_at, id) — never OFFSET, which re-walks
+  // discarded rows; keyset seeks via the index at any scroll depth.
+  async listForUser(
+    userId: string,
+    limit: number,
+    cursor: RedemptionListCursor | null,
+  ): Promise<RedemptionListItem[]> {
+    let query = this.database
+      .client<RedemptionDatabaseSchema>()
+      .selectFrom('redemption')
+      .innerJoin('reward', 'reward.id', 'redemption.reward_id')
+      .select([
+        'redemption.id as id',
+        'redemption.reward_id as rewardId',
+        'reward.name as rewardName',
+        'redemption.cost_points as costPoints',
+        'redemption.status as status',
+        'redemption.created_at as createdAt',
+      ])
+      .where('redemption.user_id', '=', userId)
+      .orderBy('redemption.created_at', 'desc')
+      .orderBy('redemption.id', 'desc')
+      .limit(limit);
+
+    if (cursor) {
+      query = query.where((eb) =>
+        eb.or([
+          eb('redemption.created_at', '<', cursor.createdAt),
+          eb.and([
+            eb('redemption.created_at', '=', cursor.createdAt),
+            eb('redemption.id', '<', cursor.id),
+          ]),
+        ]),
+      );
+    }
+
+    return query.execute();
   }
 }

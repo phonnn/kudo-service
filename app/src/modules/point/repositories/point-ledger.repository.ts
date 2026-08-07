@@ -25,6 +25,15 @@ export interface BalanceChangesSince {
   maxId: number | null;
 }
 
+export interface PointLedgerListItem {
+  id: number;
+  delta: number;
+  ledgerType: PointLedgerDatabaseSchema['point_ledger']['ledger_type'];
+  refType: PointLedgerDatabaseSchema['point_ledger']['ref_type'];
+  refId: string;
+  createdAt: Date;
+}
+
 export interface PointLedgerDatabaseSchema {
   point_ledger: {
     id: Generated<number>;
@@ -117,5 +126,43 @@ export class PointLedgerRepository {
       total: Number(total),
       maxId: maxId === null ? null : Number(maxId),
     };
+  }
+
+  // Keyset pagination on id alone — it's a real bigserial, already
+  // monotonic with insertion order, so no separate created_at tiebreaker
+  // is needed the way UUID-keyed tables need one.
+  async listForUser(
+    userId: string,
+    limit: number,
+    cursor: number | null,
+  ): Promise<PointLedgerListItem[]> {
+    let query = this.database
+      .client<PointLedgerDatabaseSchema>()
+      .selectFrom('point_ledger')
+      .select([
+        'id',
+        'delta',
+        'ledger_type',
+        'ref_type',
+        'ref_id',
+        'created_at',
+      ])
+      .where('user_id', '=', userId)
+      .orderBy('id', 'desc')
+      .limit(limit);
+
+    if (cursor !== null) {
+      query = query.where('id', '<', cursor);
+    }
+
+    const rows = await query.execute();
+    return rows.map((row) => ({
+      id: Number(row.id),
+      delta: row.delta,
+      ledgerType: row.ledger_type,
+      refType: row.ref_type,
+      refId: row.ref_id,
+      createdAt: row.created_at,
+    }));
   }
 }
