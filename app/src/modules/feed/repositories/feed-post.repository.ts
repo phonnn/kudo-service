@@ -179,7 +179,37 @@ export class FeedPostRepository {
     limit: number,
     cursor: FeedListCursor | null,
   ): Promise<FeedListItem[]> {
-    let query = this.database
+    let query = this.feedItemQuery()
+      .orderBy('feed_post.created_at', 'desc')
+      .orderBy('feed_post.id', 'desc')
+      .limit(limit);
+
+    if (cursor) {
+      query = query.where((eb) =>
+        eb.or([
+          eb('feed_post.created_at', '<', cursor.createdAt),
+          eb.and([
+            eb('feed_post.created_at', '=', cursor.createdAt),
+            eb('feed_post.id', '<', cursor.id),
+          ]),
+        ]),
+      );
+    }
+
+    const rows = await query.execute();
+    return rows.map(toFeedListItem);
+  }
+
+  async findFeedItemById(id: string): Promise<FeedListItem | null> {
+    const row = await this.feedItemQuery()
+      .where('feed_post.id', '=', id)
+      .executeTakeFirst();
+
+    return row ? toFeedListItem(row) : null;
+  }
+
+  private feedItemQuery() {
+    return this.database
       .client<FeedPostDatabaseSchema>()
       .selectFrom('feed_post')
       .innerJoin('user as author', 'author.id', 'feed_post.author_id')
@@ -208,43 +238,41 @@ export class FeedPostRepository {
         'recipient.name as recipientName',
         'point_transfer.points as points',
         'feed_post.tag as tag',
-      ])
-      .orderBy('feed_post.created_at', 'desc')
-      .orderBy('feed_post.id', 'desc')
-      .limit(limit);
-
-    if (cursor) {
-      query = query.where((eb) =>
-        eb.or([
-          eb('feed_post.created_at', '<', cursor.createdAt),
-          eb.and([
-            eb('feed_post.created_at', '=', cursor.createdAt),
-            eb('feed_post.id', '<', cursor.id),
-          ]),
-        ]),
-      );
-    }
-
-    const rows = await query.execute();
-
-    return rows.map((row) => ({
-      id: row.id,
-      type: row.type,
-      body: row.body,
-      authorId: row.authorId,
-      authorName: row.authorName,
-      commentCount: row.commentCount,
-      reactionCount: row.reactionCount,
-      createdAt: row.createdAt,
-      kudo:
-        row.recipientId && row.recipientName && row.points !== null
-          ? {
-              recipientId: row.recipientId,
-              recipientName: row.recipientName,
-              points: row.points,
-              tag: row.tag,
-            }
-          : null,
-    }));
+      ]);
   }
+}
+
+function toFeedListItem(row: {
+  id: string;
+  type: string;
+  body: string;
+  authorId: string;
+  authorName: string;
+  commentCount: number;
+  reactionCount: number;
+  createdAt: Date;
+  recipientId: string | null;
+  recipientName: string | null;
+  points: number | null;
+  tag: string | null;
+}): FeedListItem {
+  return {
+    id: row.id,
+    type: row.type,
+    body: row.body,
+    authorId: row.authorId,
+    authorName: row.authorName,
+    commentCount: row.commentCount,
+    reactionCount: row.reactionCount,
+    createdAt: row.createdAt,
+    kudo:
+      row.recipientId && row.recipientName && row.points !== null
+        ? {
+            recipientId: row.recipientId,
+            recipientName: row.recipientName,
+            points: row.points,
+            tag: row.tag,
+          }
+        : null,
+  };
 }

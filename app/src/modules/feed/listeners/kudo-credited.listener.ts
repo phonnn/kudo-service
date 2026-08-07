@@ -11,6 +11,7 @@ import {
   POST_PUBLISHED,
   type PostPublishedEvent,
 } from '../events/realtime-events';
+import { FeedMediaRepository } from '../repositories/feed-media.repository';
 import { FeedPostRepository } from '../repositories/feed-post.repository';
 
 const CONSUMER_GROUP = 'feed-post-publish-consumer';
@@ -21,6 +22,7 @@ export class KudoCreditedListener implements OnApplicationBootstrap {
     @Inject(EVENT_BUS) private readonly bus: EventBus,
     @Inject(REALTIME_PUSH) private readonly realtime: RealtimePush,
     private readonly feedPosts: FeedPostRepository,
+    private readonly feedMedia: FeedMediaRepository,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -33,15 +35,20 @@ export class KudoCreditedListener implements OnApplicationBootstrap {
     const publishedNow = await this.feedPosts.publishByTransferId(
       event.payload.transferId,
     );
+    if (!publishedNow) return;
 
-    if (publishedNow) {
-      const postPublished: PostPublishedEvent = {
-        postId: event.payload.postId,
-      };
-      this.realtime.publish(FEED_ROOM, {
-        type: POST_PUBLISHED,
-        data: postPublished,
-      });
-    }
+    const item = await this.feedPosts.findFeedItemById(event.payload.postId);
+    if (!item) return; // redelivered after a concurrent delete — nothing to broadcast
+
+    const media = await this.feedMedia.findByPostIds([item.id]);
+    const postPublished: PostPublishedEvent = {
+      ...item,
+      media: media.get(item.id) ?? null,
+    };
+
+    this.realtime.publish(FEED_ROOM, {
+      type: POST_PUBLISHED,
+      data: postPublished,
+    });
   }
 }
