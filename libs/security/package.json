@@ -1,0 +1,13 @@
+{
+  "name": "@kudo/security",
+  "version": "0.0.1",
+  "private": true,
+  "main": "../../dist/libs/security/src/index.js",
+  "types": "src/index.ts",
+  "dependencies": {
+    "jsonwebtoken": "^9.0.3"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10"
+  }
+}

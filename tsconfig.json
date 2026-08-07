@@ -14,6 +14,13 @@
     "sourceMap": true,
     "outDir": "./dist",
     "baseUrl": "./",
+    "paths": {
+      "@kudo/database": ["libs/database/src"],
+      "@kudo/messaging": ["libs/messaging/src"],
+      "@kudo/realtime": ["libs/realtime/src"],
+      "@kudo/security": ["libs/security/src"],
+      "@kudo/storage": ["libs/storage/src"]
+    },
     "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": true,
