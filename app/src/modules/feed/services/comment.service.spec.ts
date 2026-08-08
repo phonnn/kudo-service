@@ -46,6 +46,29 @@ describe('CommentService', () => {
     );
   });
 
+  it('lists comments for a post via the repository', async () => {
+    const { service, deps } = await createService();
+    deps.comments.listByPostId.mockResolvedValue([
+      {
+        id: 'comment-1',
+        postId: 'post-1',
+        authorId: 'author-1',
+        authorName: 'Alex Morgan',
+        body: 'Nice work!',
+        createdAt: new Date(),
+      },
+    ]);
+
+    const result = await service.listComments('post-1', 20);
+
+    expect(deps.comments.listByPostId).toHaveBeenCalledWith('post-1', 20);
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'comment-1', authorName: 'Alex Morgan' }),
+      ]),
+    );
+  });
+
   it('publishes only after the transaction has committed', async () => {
     const events: string[] = [];
     const deps = createDeps();
@@ -82,7 +105,7 @@ interface MockDeps {
       'findPublishedById' | 'incrementCommentCount' | 'adjustReactionCount'
     >
   >;
-  comments: jest.Mocked<Pick<CommentRepository, 'create'>>;
+  comments: jest.Mocked<Pick<CommentRepository, 'create' | 'listByPostId'>>;
   outbox: jest.Mocked<Pick<OutboxRepository, 'enqueue'>>;
   realtime: jest.Mocked<Pick<RealtimePush, 'publish'>>;
 }
@@ -104,6 +127,7 @@ function createDeps(): MockDeps {
         body: 'Nice work!',
         createdAt: new Date(),
       }),
+      listByPostId: jest.fn().mockResolvedValue([]),
     },
     outbox: { enqueue: jest.fn() },
     realtime: { publish: jest.fn() },

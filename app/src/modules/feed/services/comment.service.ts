@@ -17,6 +17,7 @@ import {
 import {
   CommentRepository,
   type CommentRecord,
+  type CommentWithAuthor,
 } from '../repositories/comment.repository';
 import { FeedPostRepository } from '../repositories/feed-post.repository';
 
@@ -73,5 +74,9 @@ export class CommentService {
     this.realtime.publish(FEED_ROOM, { type: POST_UPDATED, data: event });
 
     return comment;
+  }
+
+  listComments(postId: string, limit: number): Promise<CommentWithAuthor[]> {
+    return this.comments.listByPostId(postId, limit);
   }
 }
