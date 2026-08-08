@@ -2,6 +2,8 @@
 
 A peer-recognition/rewards platform API (NestJS + Kysely/Postgres + Redis Streams), built as a Yarn Berry workspace (`app/` + `libs/*`).
 
+For the design decisions behind this (data model, transaction boundaries, real-time feed, layering, trade-offs), see [ARCHITECTURE.md](./ARCHITECTURE.md).
+
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) 22+
